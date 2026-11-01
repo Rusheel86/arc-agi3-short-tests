@@ -1,0 +1,39 @@
+{"event": "request", "action": 1}
+{"event": "response", "action": 1, "usage": {"prompt_tokens": 5478, "total_tokens": 5591, "completion_tokens": 113, "prompt_tokens_details": {"cached_tokens": 2128, "created_cache_tokens": 0, "multimodal_tokens": {"image": 400}}, "completion_tokens_details": {"reasoning_tokens": 12}}}
+{"event": "request", "action": 1}
+{"event": "response", "action": 1, "usage": {"prompt_tokens": 6304, "total_tokens": 6895, "completion_tokens": 591, "prompt_tokens_details": {"cached_tokens": 5264, "created_cache_tokens": 0, "multimodal_tokens": {"image": 400}}, "completion_tokens_details": {"reasoning_tokens": 453}}}
+{"event": "request", "action": 1}
+{"event": "response", "action": 1, "usage": {"prompt_tokens": 7503, "total_tokens": 8097, "completion_tokens": 594, "prompt_tokens_details": {"cached_tokens": 6160, "created_cache_tokens": 0, "multimodal_tokens": {"image": 400}}, "completion_tokens_details": {"reasoning_tokens": 486}}}
+{"event": "request", "action": 2}
+{"event": "response", "action": 2, "usage": {"prompt_tokens": 9777, "total_tokens": 10289, "completion_tokens": 512, "prompt_tokens_details": {"cached_tokens": 7280, "created_cache_tokens": 0, "multimodal_tokens": {"image": 1200}}, "completion_tokens_details": {"reasoning_tokens": 284}}}
+{"event": "request", "action": 6}
+{"event": "response", "action": 6, "usage": {"prompt_tokens": 13027, "total_tokens": 13532, "completion_tokens": 505, "prompt_tokens_details": {"cached_tokens": 9632, "created_cache_tokens": 0, "multimodal_tokens": {"image": 2000}}, "completion_tokens_details": {"reasoning_tokens": 445}}}
+{"event": "request", "action": 6}
+{"event": "response", "action": 6, "usage": {"prompt_tokens": 14224, "total_tokens": 14705, "completion_tokens": 481, "prompt_tokens_details": {"cached_tokens": 12880, "created_cache_tokens": 0, "multimodal_tokens": {"image": 2000}}, "completion_tokens_details": {"reasoning_tokens": 382}}}
+{"event": "request", "action": 6}
+{"event": "response", "action": 6, "usage": {"prompt_tokens": 15270, "total_tokens": 16428, "completion_tokens": 1158, "prompt_tokens_details": {"cached_tokens": 14112, "created_cache_tokens": 0, "multimodal_tokens": {"image": 2000}}, "completion_tokens_details": {"reasoning_tokens": 1059}}}
+{"event": "request", "action": 7}
+{"event": "response", "action": 7, "usage": {"prompt_tokens": 18068, "total_tokens": 19032, "completion_tokens": 964, "prompt_tokens_details": {"cached_tokens": 15120, "created_cache_tokens": 0, "multimodal_tokens": {"image": 2800}}, "completion_tokens_details": {"reasoning_tokens": 834}}}
+{"event": "request", "action": 8}
+{"event": "response", "action": 8, "usage": {"prompt_tokens": 20711, "total_tokens": 21692, "completion_tokens": 981, "prompt_tokens_details": {"cached_tokens": 17920, "created_cache_tokens": 0, "multimodal_tokens": {"image": 3600}}, "completion_tokens_details": {"reasoning_tokens": 864}}}
+{"event": "request", "action": 9}
+{"event": "response", "action": 9, "usage": {"prompt_tokens": 23709, "total_tokens": 25153, "completion_tokens": 1444, "prompt_tokens_details": {"cached_tokens": 20496, "created_cache_tokens": 0, "multimodal_tokens": {"image": 4400}}, "completion_tokens_details": {"reasoning_tokens": 1393}}}
+{"event": "request", "action": 9}
+{"event": "response", "action": 9, "usage": {"prompt_tokens": 25251, "total_tokens": 25346, "completion_tokens": 95, "prompt_tokens_details": {"cached_tokens": 23520, "created_cache_tokens": 0, "multimodal_tokens": {"image": 4400}}, "completion_tokens_details": {"reasoning_tokens": 31}}}
+{"event": "request", "action": 9}
+{"event": "response", "action": 9, "usage": {"prompt_tokens": 25733, "total_tokens": 28252, "completion_tokens": 2519, "prompt_tokens_details": {"cached_tokens": 25088, "created_cache_tokens": 448, "multimodal_tokens": {"image": 4400}}, "completion_tokens_details": {"reasoning_tokens": 2419}}}
+{"event": "request", "action": 10}
+{"event": "response", "action": 10, "usage": {"prompt_tokens": 29858, "total_tokens": 29980, "completion_tokens": 122, "prompt_tokens_details": {"cached_tokens": 25536, "created_cache_tokens": 4256, "multimodal_tokens": {"image": 5200}}, "completion_tokens_details": {"reasoning_tokens": 51}}}
+{"event": "request", "action": 11}
+{"event": "response", "action": 11, "usage": {"prompt_tokens": 31283, "total_tokens": 32542, "completion_tokens": 1259, "prompt_tokens_details": {"cached_tokens": 29680, "created_cache_tokens": 0, "multimodal_tokens": {"image": 5600}}, "completion_tokens_details": {"reasoning_tokens": 1109}}}
+{"event": "request", "action": 13}
+{"event": "response", "action": 13, "usage": {"prompt_tokens": 34564, "total_tokens": 42095, "completion_tokens": 7531, "prompt_tokens_details": {"cached_tokens": 31136, "created_cache_tokens": 0, "multimodal_tokens": {"image": 6400}}, "completion_tokens_details": {"reasoning_tokens": 7414}}}
+{"event": "request", "action": 15}
+{"event": "response", "action": 15, "usage": {"prompt_tokens": 43693, "total_tokens": 45261, "completion_tokens": 1568, "prompt_tokens_details": {"cached_tokens": 34384, "created_cache_tokens": 0, "multimodal_tokens": {"image": 7200}}, "completion_tokens_details": {"reasoning_tokens": 1462}}}
+{"event": "request", "action": 17}
+{"event": "response", "action": 17, "usage": {"prompt_tokens": 47021, "total_tokens": 50093, "completion_tokens": 3072, "prompt_tokens_details": {"cached_tokens": 43568, "created_cache_tokens": 3248, "multimodal_tokens": {"image": 8000}}, "completion_tokens_details": {"reasoning_tokens": 2845}}}
+{"event": "request", "action": 20}
+{"event": "response", "action": 20, "usage": {"prompt_tokens": 52224, "total_tokens": 53058, "completion_tokens": 834, "prompt_tokens_details": {"cached_tokens": 46816, "created_cache_tokens": 0, "multimodal_tokens": {"image": 8800}}, "completion_tokens_details": {"reasoning_tokens": 645}}}
+{"event": "request", "action": 25}
+{"event": "response", "action": 25, "usage": {"prompt_tokens": 54762, "total_tokens": 56107, "completion_tokens": 1345, "prompt_tokens_details": {"cached_tokens": 52080, "created_cache_tokens": 0, "multimodal_tokens": {"image": 9600}}, "completion_tokens_details": {"reasoning_tokens": 1139}}}
+{"event": "request", "action": 26}

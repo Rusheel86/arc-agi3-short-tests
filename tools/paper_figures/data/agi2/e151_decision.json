@@ -1,0 +1,21 @@
+{
+ "decision": {
+  "H": 4,
+  "K": 9,
+  "states": {
+   "71e489b6": "HIT",
+   "b9e38dc0": "REACH",
+   "7b5033c1": "REACH",
+   "135a2760": "HIT",
+   "2d0172a1": "REACH",
+   "31f7f899": "HIT",
+   "332f06d7": "REACH",
+   "7666fa5d": "HIT",
+   "c7f57c3e": "REACH",
+   "fc7cae8d": "REACH",
+   "53fb4810": "REACH",
+   "142ca369": "REACH",
+   "8f3a5a89": "REACH"
+  }
+ }
+}

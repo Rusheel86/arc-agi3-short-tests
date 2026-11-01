@@ -1,0 +1,3 @@
+# the all_busy throughput lines printed by the E073 run notebook, verbatim
+control  all_busy:   995.5 generated tok/s
+prune384  all_busy:   987.0 generated tok/s

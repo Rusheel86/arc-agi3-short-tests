@@ -1,0 +1,125 @@
+# E149 v3 (research tool): half-clock + doubled model-visible clock, on the E154 base
+# Cell-level unified diff: E154 (sha256 6cf982cd) -> E149 v3 (arc3-e149-v3-halfclock-keepalive.ipynb, sha256 69a4b748). Cells not listed are byte-identical.
+# Changed or added cells:
+#   changed  old 1   new 1   # ============ E146 v2 stub-commit mode, FAIL-SAFE (ledger E146 Amendment v2; inserted by 
+#   inserted         new 13  %%writefile /kaggle/e149-display-clock.patch
+#   inserted         new 17  # ======================= E149 (T1, ledger E149): the half-clock draw's display patch ====
+#   changed  old 30  new 32  # Make one-off changes to `bm`, `bm.games`, or `bm.solver` here before the run starts.
+
+--- E154 (sha256 6cf982cd) cell 1
++++ E149 v3 (arc3-e149-v3-halfclock-keepalive.ipynb, sha256 69a4b748) cell 1
+@@ -96,8 +96,10 @@
+                                   'a5044e4fbb93884bcc5f9698d7f33eb50a66697cc0f8d0ad19d5fc1674068b37',
+                                   'c75599ae5ac7caee1e1a1850bda1fc571dfe7b93d42a7c407a62e5adf5e2d9eb',
+                                   '82b6e172d65f65c8a4778974879b39b00e6a6be0a3ed846575fcb9e3b1d2390b',
++                                  '8f4da9c2ec34766c16b19c022321646716b94c7799005c12e97c563218bea815',
+                                   '114a7f5aa5bf8a5293da5ca476474ebd77b1319fbd4c1d5548aea1f140addece',
+                                   '161d463d547ae12a5632c2c100e46fae01ea8748d88650804ee045be98cbf999',
++                                  'b7fc5090e717809e6b9162ae31dc68d510ead1b6523b3435db0c17c178cdeab1',
+                                   '3d2ad7415a7c4d987c3c672f84c08c4875e6b728b4be8269dabd751b404990f0',
+                                   '06752f75d462044f90a877677db9885c8c701e7d9e7b33a97afba9f64d2e93a4',
+                                   'bbfd0be0a9bb5b31b4ab45bbff1b7f26f9533f03db3f51016ee88857bf982f50',
+@@ -106,7 +108,7 @@
+                                   'e90a3a7aafca6e8f3a041b70a4dbbec721adb62b58a19e1f89ac4f019d0ae976',
+                                   '887fff059248c17e402cbc98a6f6fe9b14163be0592603889cca4ddad8df7353',
+                                   '63d378a0f4ca15b2b46e69e8198b731b703e4ca91b3a889951127846b42cdd5d',
+-                                  'e7dbf2494cfd31e6e818a401fdc837afe95f30addcab29440e457d7f6b209c85',
++                                  '344ae0b30802f25a88ca01416e1709f351db1dde5b004ec35909a4817822c390',
+                                   'ba1a098185cfdde69293193cebdf108567a446667086c4cb771660a1696459ac',
+                                   '01775dc06fa0de1d41a51b170e2ca469848c5722b19a972c2a049f53550efeb9',
+                                   'c207388aa6e5ade041a1bb19985ed6525f94be289d9a0f810569de5807bf7806',
+--- /dev/null
++++ E149 v3 (arc3-e149-v3-halfclock-keepalive.ipynb, sha256 69a4b748) cell 13
+@@ -0,0 +1,27 @@
++%%writefile /kaggle/e149-display-clock.patch
++diff --git a/ARC3-Inference/inference/agent/tool_agent.py b/ARC3-Inference/inference/agent/tool_agent.py
++--- a/ARC3-Inference/inference/agent/tool_agent.py
+++++ b/ARC3-Inference/inference/agent/tool_agent.py
++@@ -5770,9 +5770,21 @@
++             compact["stop_reason"] = payload.get("stop_reason")
++         if payload.get("stop_detail"):
++             compact["stop_detail"] = payload.get("stop_detail")
+++        # E149 (ledger E149): the clock the MODEL reads is the real one x ARC3_DISPLAY_CLOCK_SCALE (unset = 1 = E098).
+++        # _game_elapsed_seconds below, max_runtime_s_per_game, the request timeouts and the priority gate stay real.
+++        display_scale_setting = os.environ.get("ARC3_DISPLAY_CLOCK_SCALE", "").strip()
+++        try:
+++            display_scale = float(display_scale_setting) if display_scale_setting else 1.0
+++        except ValueError:
+++            raise ValueError("ARC3_DISPLAY_CLOCK_SCALE must be a finite number > 0") from None
+++        if not 0.0 < display_scale < float("inf"):
+++            raise ValueError("ARC3_DISPLAY_CLOCK_SCALE must be a finite number > 0")
++         for timing_key in ("run_elapsed_seconds", "time_remaining_seconds"):
++             if timing_key in payload:
++-                compact[timing_key] = payload.get(timing_key)
+++                timing_value = payload.get(timing_key)
+++                if display_scale != 1.0 and isinstance(timing_value, (int, float)) and not isinstance(timing_value, bool):
+++                    timing_value = float(timing_value) * display_scale
+++                compact[timing_key] = timing_value
++         # the session's own clock, which is also what decides when the game
++         # stops - so the endgame phase cannot drift away from the deadline it
++         # is meant to anticipate. It starts at session construction, so a game
+--- /dev/null
++++ E149 v3 (arc3-e149-v3-halfclock-keepalive.ipynb, sha256 69a4b748) cell 17
+@@ -0,0 +1,47 @@
++# ======================= E149 (T1, ledger E149): the half-clock draw's display patch =======================
++# In plain words: a competition rerun of this version gives each game HALF of E098's wall-clock (E149_RUNTIME_MIN = 266
++# instead of 532 min; set in the customization hook's TRUE_SUBMISSION branch), while the clock the MODEL reads in every
++# action result (run_elapsed_seconds and time_remaining_seconds, copied by tool_agent.py _compact_action_result) is
++# multiplied by ARC3_DISPLAY_CLOCK_SCALE = E149_DISPLAY_CLOCK_SCALE (set in the same branch). The model still sees a
++# 532-minute game; only the tokens per game change. The game's own clock stays real: _game_elapsed_seconds (endgame
++# switch, off here), max_runtime_s_per_game (games stop at 266 min), the request timeouts and the priority gate (tail
++# fade = 0.2 of the shared deadline: from minute 212.8). This cell applies the patch the cell after the E097 patch wrote,
++# after E098's 8 patches; fail closed: the anchor must be found exactly once, git apply --check must pass, the marker
++# must be there exactly once afterwards and the file must compile, else this cell raises and the run stops.
++import hashlib
++E149_RUNTIME_MIN = 266         # per-game wall-clock of the competition rerun (E098: 532)
++E149_DISPLAY_CLOCK_SCALE = 2   # model-visible clock = real clock x this
++E149_PATCH = {'patch': '/kaggle/e149-display-clock.patch', 'file': 'ARC3-Inference/inference/agent/tool_agent.py', 'marker': '# E149 (ledger E149): the clock the MODEL reads',
++              'anchor': '        for timing_key in ("run_elapsed_seconds", "time_remaining_seconds"):\n            if timing_key in payload:\n                compact[timing_key] = payload.get(timing_key)\n'}
++assert E149_RUNTIME_MIN * E149_DISPLAY_CLOCK_SCALE == 532, 'E149: the displayed game must be E098-long'
++
++
++def _e149_apply(src_dir):
++    target = Path(src_dir) / E149_PATCH['file']
++
++    def fail(why):
++        raise RuntimeError(f"E149 display patch NOT applied ({why}); stopping: this version must not play without it")
++
++    text = target.read_text(encoding='utf-8')
++    if text.count(E149_PATCH['anchor']) != 1 or E149_PATCH['marker'] in text:
++        fail(f"anchor found {text.count(E149_PATCH['anchor'])} time(s), marker {text.count(E149_PATCH['marker'])} "
++             f"time(s) in {target}; expected 1 and 0")
++    for args in (['--check', '-v'], ['-v']):
++        r = subprocess.run(['git', 'apply', *args, E149_PATCH['patch']], cwd=str(src_dir), capture_output=True,
++                           text=True, timeout=120)
++        if r.returncode != 0:
++            fail(f"git apply {' '.join(args)} rc {r.returncode}: {(r.stderr or r.stdout).strip()[-600:]}")
++    text = target.read_text(encoding='utf-8')
++    if text.count(E149_PATCH['marker']) != 1 or E149_PATCH['anchor'] in text:
++        fail(f"after git apply: marker {text.count(E149_PATCH['marker'])} time(s), anchor "
++             f"{text.count(E149_PATCH['anchor'])} time(s); expected 1 and 0")
++    try:
++        compile(text, str(target), 'exec')
++    except SyntaxError as exc:
++        fail(f"patched file does not compile: {exc!r}")
++    return {'file': str(target), 'sha256': hashlib.sha256(text.encode('utf-8')).hexdigest()}
++
++
++E149_APPLIED = _e149_apply(f"{BUNDLE_DIR}/src")
++print(f"E149 display patch applied: {E149_APPLIED}; competition rerun: {E149_RUNTIME_MIN} min per game, "
++      f"model-visible clock x{E149_DISPLAY_CLOCK_SCALE}", flush=True)
+--- E154 (sha256 6cf982cd) cell 30
++++ E149 v3 (arc3-e149-v3-halfclock-keepalive.ipynb, sha256 69a4b748) cell 32
+@@ -14,8 +14,11 @@
+     bm.n_passes = 1
+     if USE_PRIORITY_SCHEDULING:
+         bm.solver.concurrency = 120  # game count should be 110
+-        bm.solver.max_runtime_s_per_game = 532*60
++        bm.solver.max_runtime_s_per_game = E149_RUNTIME_MIN*60  # E149 (T1): half of E098's 532*60
++        os.environ['ARC3_DISPLAY_CLOCK_SCALE'] = str(E149_DISPLAY_CLOCK_SCALE)  # E149: the model reads 2x the real clock
+ else:
++    os.environ['ARC3_DISPLAY_CLOCK_SCALE'] = str(E149_DISPLAY_CLOCK_SCALE)  # E149 v3: the commit smoke shows the scaled clock
++    print(f'E149 v3 commit smoke: model-visible clock x{E149_DISPLAY_CLOCK_SCALE} (the games keep the commit length)')
+     if USE_PRIORITY_SCHEDULING:
+         bm.solver.concurrency = (25 - len(demo_excluded_games)) * bm.n_passes
+         bm.solver.max_runtime_s_per_game = 25*60 #532*60 * bm.solver.concurrency // 110

@@ -1,0 +1,23 @@
+# E058: temperature per request
+# What it does: tool_agent.py passes a per-request temperature from the settings.
+# Applies to: the Duck harness source tree (ARC3-Inference/...), after Franzen's harness-changes.patch and the
+#   patches numbered before this one, in this order (the order of the notebook's settings cell).
+# Files: ARC3-Inference/inference/agent/tool_agent.py
+# Source: notebook/arc3-e154-keepalive.ipynb, the `%%writefile /kaggle/e058-changes.patch` cell (cell 8 of the original
+#   notebook, 9 after the licence header); the text below the header is that cell's body, byte for byte.
+# sha256 of the body: b7c8fc76595ce9582852f09371f5ea9bd32f5325e5117e632b8b396265520f16
+# Licence: MIT-0 (see LICENSE). Apply with: python patches/apply_patches.py --harness <dir> (or git apply).
+
+diff --git a/ARC3-Inference/inference/agent/tool_agent.py b/ARC3-Inference/inference/agent/tool_agent.py
+--- a/ARC3-Inference/inference/agent/tool_agent.py
++++ b/ARC3-Inference/inference/agent/tool_agent.py
+@@ -5229,7 +5229,8 @@
+             model=self._model.model_id,
+             messages=messages,
+             max_tokens=self._max_output_tokens if max_tokens is None else max_tokens,
+-            temperature=_LOCAL_ANALYZER_TEMPERATURE,
++            # E058: read per request, so arms in one process can differ
++            temperature=_get_env_float("LOCAL_ANALYZER_TEMPERATURE", _LOCAL_ANALYZER_TEMPERATURE),
+             top_p=_LOCAL_ANALYZER_TOP_P,
+             top_k=_LOCAL_ANALYZER_TOP_K,
+             thinking=(

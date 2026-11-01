@@ -1,0 +1,3 @@
+# two lines of analysis/throughput_arithmetic_results.txt (KV pool sizes in blocks), verbatim
+unpruned util 0.98 (E058/E061b mtp3)        19.63 GiB ->   922 blocks of 1664
+prune384 util 0.98 (E073/E081, 24 seqs)     35.32 GiB ->  1660 blocks of 1664

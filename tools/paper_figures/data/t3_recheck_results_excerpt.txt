@@ -1,0 +1,4 @@
+# lines of analysis/t3_recheck_results.txt (E072 elasticity, its bootstrap band and the E061 noise floor), verbatim
+    140->180k: E058 0.54, new 0.66, POOLED 0.59
+  pooled elasticity, game-cluster bootstrap 90%: 140->180k 0.33..0.89; 100->180k 0.34..1.16; slope 100-195k 0.35..1.07
+  The new run also had 1.035x the tokens. Pre-registered E060 rule C: noise floor for E061 = max(5, 6) = 6 levels.

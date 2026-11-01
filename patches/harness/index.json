@@ -1,0 +1,72 @@
+[
+ {
+  "file": "01-e040-context-window.patch",
+  "cell": "e040-changes.patch",
+  "files": [
+   "ARC3-Inference/inference/agent/tool_agent.py"
+  ],
+  "body_sha256": "a71a60925f2110d1378317146d5f25e10c41e5eba22f6b35c7cea9aae95c89b1"
+ },
+ {
+  "file": "02-arm-reasoning-effort-switch.patch",
+  "cell": "arm-changes.patch",
+  "files": [
+   "ARC3-Inference/inference/agent/tool_agent.py"
+  ],
+  "body_sha256": "08984f4b6117b71f4c77b718a893d6280a460fdedec31177fe3080f024451b3c"
+ },
+ {
+  "file": "03-e055-bad-words-switch.patch",
+  "cell": "e055-changes.patch",
+  "files": [
+   "ARC3-Inference/inference/agent/tool_agent.py"
+  ],
+  "body_sha256": "30caacbe9a32fed0c2295d1ca7da22f4fd94c8c63339048450f1c1129d0afc6d"
+ },
+ {
+  "file": "04-e058-temperature-per-request.patch",
+  "cell": "e058-changes.patch",
+  "files": [
+   "ARC3-Inference/inference/agent/tool_agent.py"
+  ],
+  "body_sha256": "b7c8fc76595ce9582852f09371f5ea9bd32f5325e5117e632b8b396265520f16"
+ },
+ {
+  "file": "05-e077-state-handoff.patch",
+  "cell": "e077-state-handoff.patch",
+  "files": [
+   "ARC3-Inference/inference/agent/python_tool_sandbox.py",
+   "ARC3-Inference/inference/agent/runtime_state.py",
+   "ARC3-Inference/inference/agent/tool_agent.py",
+   "ARC3-Inference/inference/framework/solver.py"
+  ],
+  "body_sha256": "ecf673dbc46687fe9fa67104619c695d31ffc00c468dde1bdfb01cb25f617018"
+ },
+ {
+  "file": "06-e091-max-output.patch",
+  "cell": "e091-max-output.patch",
+  "files": [
+   "ARC3-Inference/inference/agent/tool_agent.py"
+  ],
+  "body_sha256": "9043aa6a025de4a6b0a52ab24732e48d83d7497b50fb8a56c19d3ad5fed32f7f"
+ },
+ {
+  "file": "07-e097-harness-v3.patch",
+  "cell": "e097-harness-v3.patch",
+  "files": [
+   "ARC3-Inference/inference/agent/tool_agent.py",
+   "ARC3-Inference/inference/utils/harness_v3.py",
+   "ARC3-Inference/inference/utils/roguelike_map.py",
+   "ARC3-Inference/inference/utils/shape_motion.py"
+  ],
+  "body_sha256": "c826a8a8daa68dd1f3c2a331d0d8d317b73099a2dc1a98508cb4001e00c983d6"
+ },
+ {
+  "file": "08-e154-keepalive.patch",
+  "cell": "e154-keepalive.patch",
+  "files": [
+   "ARC3-Inference/inference/framework/solver.py"
+  ],
+  "body_sha256": "3ebf20c13dec97b7bf36f30a0dc40ecb1ebb997b338f6edef5bcd712b0e59e66"
+ }
+]

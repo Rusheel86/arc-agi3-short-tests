@@ -1,0 +1,26 @@
+ARC-AGI-3 entry E154: release folder
+Our own code here is MIT-0 (see LICENSE). This folder also contains third-party code under the Apache License,
+Version 2.0 (full text: LICENSES/Apache-2.0.txt). As that licence asks, the notices are kept and changes are stated:
+
+1. k8v4_port/e083_k8v4_port.py (the same bytes are embedded, zlib + base64, in notebook/arc3-e154-keepalive.ipynb)
+   Contains the nvfp4 bit helpers (E2M1 and E4M3 decode/encode) and the value quantiser of kvq-patch.py from
+   vllm-qwen38-flash-next-kv-quant by andreasgru, Copyright 2026 Andreas Gruhler, Apache License 2.0
+   (k8v4_port/LICENSE is that project's licence file). Changes by Rusheel Sharma, 2026: the helpers were renamed and
+   taken into a new port; the mixed fp8-key / nvfp4-value row layout, its writer and the kernel's value-only branch are
+   new. Everything the port inserts into vLLM carries the marker ARC3-KVQ-E083. The whole file is Apache-2.0.
+   It edits an installed vLLM (Apache License 2.0, the vLLM project) at run time; no vLLM file is shipped here.
+
+2. notebook/arc3-e154-keepalive.ipynb: the `harness-changes.patch` cell, the notebook's base cells and its
+   "About this notebook" text come from Daniel Franzen's ARC-AGI-3 Milestone 2 solution (Apache License 2.0;
+   kaggle.com/code/dfranzen/arc-agi-3-milestone-2-solution, github.com/da-fr/arc-agi-3-solution). Our cells and patch
+   cells are marked with ledger numbers E0xx / E1xx.
+
+3. notebook/arc3-e154-keepalive.ipynb: the server cell adapts the vLLM launcher and watchdog of Lord Han Solo's notebook
+   (kaggle.com/code/lordhansolo/built-on-tufa-labs-duck-harness-milestone-2, Apache 2.0). Our changes are marked E0xx / E1xx.
+
+4. The patch files in patches/ and the `harness-changes.patch` cell contain context lines of the Tufa Labs Duck harness
+   (ARC3-Inference, commit 7652836; Jeroen Cottaar, Tufa Labs). Its licence is not confirmed (THIRD_PARTY.md): the Kaggle
+   pages say Apache 2.0 and MIT, and the GitHub repository has no LICENSE file.
+
+No upstream project named above ships a NOTICE file in the copies we used (checked 2026-10-30 in the local copies of
+andreasgru's repository, Franzen's repository and vLLM e975732).

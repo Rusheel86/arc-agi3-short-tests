@@ -1,0 +1,117 @@
+# E149 v4 clock origin (research tool; ran as kernel rusheelsharma/arc-agi-3-e109 version 191: smoke commit PASS 2026-10-30,
+#   draw 1 (ref 57806285) scored 15.06, inside the registered primary band 13.5-24.8; reading: ledger E149)
+# What it does: with ARC3_GAME_CLOCK_ORIGIN=first_response, every game's time limit, its timing payload (so the request
+#   timeouts and the model-visible clock) and the priority gate's shared clock count from the run's FIRST successful model
+#   response instead of the session construction, so a slow model load no longer eats the half-clock games' time.
+#   ARC3_RUN_DEADLINE_EPOCH caps every game at a run deadline. Unset = E098/E154/E149 v3 behaviour.
+# Applies to: solver.py (6 hunks) and tool_agent.py (1 hunk) of the E149 v3 tree (patches/harness/ + e149-v3-display-clock.patch).
+# Source: decoded from the zlib + base85 blob in the apply cell of arc3-e149-v4-halfclock.ipynb (the notebook stores it
+#   compressed to stay under Kaggle's 1 MB source limit); sha256 of the decoded patch 59ad8606de32beb231c47505edd025c120f4d764f6a7e360b338b39567ff678c
+# Licence: MIT-0.
+
+diff --git a/ARC3-Inference/inference/framework/solver.py b/ARC3-Inference/inference/framework/solver.py
+--- a/ARC3-Inference/inference/framework/solver.py
++++ b/ARC3-Inference/inference/framework/solver.py
+@@ -150,2 +150,20 @@
+ 
++# E149 v4 (ledger E149 Amendment v4): clocks from the run's first model response; unset = E098
++_E149_CLOCK_LOCK = threading.Lock()
++
++
++def _e149_on() -> bool:
++    return os.environ.get("ARC3_GAME_CLOCK_ORIGIN", "").strip().lower() == "first_response"
++
++
++def _e149_run_deadline() -> float | None:
++    raw = os.environ.get("ARC3_RUN_DEADLINE_EPOCH", "").strip()
++    if not raw:
++        return None
++    epoch = float(raw)
++    if not -float("inf") < epoch < float("inf"):
++        raise ValueError("ARC3_RUN_DEADLINE_EPOCH must be finite")
++    return time.monotonic() + epoch - time.time()
++
++
+ MAX_CONSECUTIVE_ANALYZER_FAILURES = _env_number("ARC3_MAX_ANALYZER_FAILURES", 10, int)
+@@ -567,2 +585,14 @@
+     def runtime_limit_reached(self) -> bool:
++        if _e149_on():  # E149 v4: from the run's first model response, capped by the run deadline
++            now, origin = time.monotonic(), getattr(self.solver, "_e149_origin", None)
++            run_deadline = _e149_run_deadline()
++            if run_deadline is not None and now >= run_deadline:
++                if not getattr(self, "_e149_cut", False):
++                    self._e149_cut = True
++                    log.warning("%s: E149 v4 run deadline: the game stops %s", self.game.game_run.game_id,
++                                "before any model response" if origin is None else
++                                f"{(now - origin) / 60:.1f} min after the first model response")
++                return True
++            limit = self.solver.max_runtime_s_per_game
++            return origin is not None and limit is not None and now - origin >= limit
+         if self.solver.max_runtime_s_per_game is None:
+@@ -574,2 +604,10 @@
+     def timing_payload(self) -> dict[str, float | None]:
++        if _e149_on():  # E149 v4: elapsed from the run's first model response
++            now, origin = time.monotonic(), getattr(self.solver, "_e149_origin", None)
++            elapsed = max(0.0, now - origin) if origin is not None else 0.0
++            limit, run_deadline = self.solver.max_runtime_s_per_game, _e149_run_deadline()
++            remaining = None if limit is None else max(0.0, limit - elapsed)
++            if remaining is not None and run_deadline is not None:
++                remaining = min(remaining, max(0.0, run_deadline - now))
++            return {"run_elapsed_seconds": elapsed, "time_remaining_seconds": remaining}
+         elapsed = max(0.0, time.monotonic() - self.started_at)
+@@ -665,2 +703,4 @@
+             )
++            if _e149_on():  # E149 v4: provisional; re-set at the run's first model response
++                deadline = self.solver._e149_gate_deadline(self.started_at)
+             soft_remaining = self.solver.soft_time_remaining_seconds()
+@@ -1557,2 +1597,3 @@
+         self._warmup_lock = threading.Lock()
++        self._e149_origin, self._e149_release = None, time.monotonic()  # E149 v4: once per run
+         if self.start_local_server:
+@@ -1856,2 +1897,29 @@
+ 
++    def _e149_gate_deadline(self, started_at: float) -> float | None:  # E149 v4: the gate's shared deadline
++        origin, limit, run_deadline = getattr(self, "_e149_origin", None), self.max_runtime_s_per_game, _e149_run_deadline()
++        if limit is None:
++            return run_deadline
++        if origin is not None:
++            deadline = origin + limit
++        else:
++            deadline = run_deadline if run_deadline is not None else started_at + limit
++        return deadline if run_deadline is None else min(deadline, run_deadline)
++
++    def _e149_note_model_response(self) -> None:  # E149 v4: the run's first model response starts every game's clock
++        if getattr(self, "_e149_origin", None) is not None:
++            return
++        with _E149_CLOCK_LOCK:
++            if getattr(self, "_e149_origin", None) is not None:
++                return
++            self._e149_origin = origin = time.monotonic()
++        deadline, gate = self._e149_gate_deadline(origin), _priority_gate()
++        if gate is not None and deadline is not None:
++            with gate._cond:
++                gate._clock_start, gate._clock_deadline = origin, deadline
++        limit, run_deadline = self.max_runtime_s_per_game, _e149_run_deadline()
++        log.warning("E149 v4 clock origin: the run's first model response came %.2f min after the release; game limit "
++                    "%s min%s", (origin - getattr(self, "_e149_release", origin)) / 60,
++                    None if limit is None else round(limit / 60, 2),
++                    "" if run_deadline is None else f"; run deadline in {(run_deadline - origin) / 60:.1f} min")
++
+     def _claim_warmup_slot(self) -> bool:
+@@ -1919,2 +1987,4 @@
+             analyzer = self._make_analyzer(game, index, local_server)
++            if _e149_on():  # E149 v4: the analyzer reports its replies
++                analyzer._e149_on_response = self._e149_note_model_response
+             session = _HarnessGameSession(
+diff --git a/ARC3-Inference/inference/agent/tool_agent.py b/ARC3-Inference/inference/agent/tool_agent.py
+--- a/ARC3-Inference/inference/agent/tool_agent.py
++++ b/ARC3-Inference/inference/agent/tool_agent.py
+@@ -5405,2 +5405,8 @@
+         choice = choices[0]
++        e149_hook = getattr(self, "_e149_on_response", None)  # E149 v4: set only with ARC3_GAME_CLOCK_ORIGIN=first_response
++        if e149_hook is not None:
++            try:
++                e149_hook()
++            except Exception as exc:  # never costs a reply
++                log.warning("E149 v4 clock hook failed: %r", exc)
+         return _ChatCompletionResult(

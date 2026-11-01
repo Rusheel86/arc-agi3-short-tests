@@ -1,0 +1,18 @@
+what,value,label,source
+E081 score (1 draw),23.98,measured,E081 via analysis/leaderboard_noise.py SUBS
+E098 draw 1,27.27,measured,E098 via analysis/leaderboard_noise.py SUBS
+E098 draw 2,30.07,measured,E098 via analysis/leaderboard_noise.py SUBS
+E098 draw 3,28.24,measured,E098 via analysis/leaderboard_noise.py SUBS
+E098 draw 4,28.37,measured,E098 via analysis/leaderboard_noise.py SUBS
+E098 draw 5,29.68,measured,E098 via analysis/leaderboard_noise.py SUBS
+E098 draw 6,25.01,measured,E098 via analysis/leaderboard_noise.py SUBS
+E098 mean,28.1067,computed,E138
+E098 SE,0.7462,computed,E138
+"E081 tok/s (60-min screen, 24 games)",1112.2,measured,E081 run notebook
+"E098 tok/s bench (MTP, repeat)",530.88;574.67,measured,E137 summary.json
+decode hours of the scoring run,8.5,guess,9 h minus ~30 min server start
+E081 tokens per game,309394,computed,tok/s x hours / 110
+"E098 tokens per game (lo, mid, hi)",147681;153772;159863,computed,same
+elasticity 140-180k (90% band),0.59;0.33;0.89,measured,E072 t3_recheck_results.txt
+constant-elasticity extrapolation at E098 (band),15.87;12.87;19.04,computed,E081 score x (x98/x81)^e; extrapolated beyond 140-180k; independent of the decode-hours guess
+"no returns above 180k, elasticity below",21.85,computed,E081 score x (x98/180k)^0.59

@@ -1,0 +1,36 @@
+# E149 v3 display clock (research tool; the half-clock draw of kernel version 190 scored 0.31 = VOID, cause not found)
+# What it does: with ARC3_DISPLAY_CLOCK_SCALE=2, tool_agent.py `_compact_action_result` multiplies the two clock fields the
+#   model reads (run_elapsed_seconds, time_remaining_seconds), so a game cut to 266 minutes still reads as a 532-minute game.
+#   Unset = E098/E154 byte for byte. The real clock (stops, timeouts, the priority gate) is untouched.
+# Applies to: tool_agent.py after the eight harness patches in patches/harness/ (the E149 v3 notebook's order: E098's 8, e154, e149).
+# The run-time half-clock itself (max_runtime_s_per_game 532*60 -> 266*60) is a two-line change of the notebook's customization
+#   hook: see e149-v3-notebook-cells.diff.
+# Source: the `%%writefile /kaggle/e149-display-clock.patch` cell of arc3-e149-v3-halfclock-keepalive.ipynb; sha256 b60d92e1898e1f440e7e7decc269372820c83333d4561822fb629929fa483eed
+# Licence: MIT-0.
+
+diff --git a/ARC3-Inference/inference/agent/tool_agent.py b/ARC3-Inference/inference/agent/tool_agent.py
+--- a/ARC3-Inference/inference/agent/tool_agent.py
++++ b/ARC3-Inference/inference/agent/tool_agent.py
+@@ -5770,9 +5770,21 @@
+             compact["stop_reason"] = payload.get("stop_reason")
+         if payload.get("stop_detail"):
+             compact["stop_detail"] = payload.get("stop_detail")
++        # E149 (ledger E149): the clock the MODEL reads is the real one x ARC3_DISPLAY_CLOCK_SCALE (unset = 1 = E098).
++        # _game_elapsed_seconds below, max_runtime_s_per_game, the request timeouts and the priority gate stay real.
++        display_scale_setting = os.environ.get("ARC3_DISPLAY_CLOCK_SCALE", "").strip()
++        try:
++            display_scale = float(display_scale_setting) if display_scale_setting else 1.0
++        except ValueError:
++            raise ValueError("ARC3_DISPLAY_CLOCK_SCALE must be a finite number > 0") from None
++        if not 0.0 < display_scale < float("inf"):
++            raise ValueError("ARC3_DISPLAY_CLOCK_SCALE must be a finite number > 0")
+         for timing_key in ("run_elapsed_seconds", "time_remaining_seconds"):
+             if timing_key in payload:
+-                compact[timing_key] = payload.get(timing_key)
++                timing_value = payload.get(timing_key)
++                if display_scale != 1.0 and isinstance(timing_value, (int, float)) and not isinstance(timing_value, bool):
++                    timing_value = float(timing_value) * display_scale
++                compact[timing_key] = timing_value
+         # the session's own clock, which is also what decides when the game
+         # stops - so the endgame phase cannot drift away from the deadline it
+         # is meant to anticipate. It starts at session construction, so a game

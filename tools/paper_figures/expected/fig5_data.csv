@@ -1,0 +1,14 @@
+panel,stage,count,source
+a,"Test outputs scored (4B, 4 views)",51,E142
+a,Missed by the 4B model,47,E142
+a,Rescuable: answer within 1-3 cell switches,13,E142
+a,"Reachable in 16 views, not already found (4 were)",9,E151
+a,Run with the real decoder (CPU),2,E152
+a,Truth found by the decoder,0,E152
+b,Labelled public tasks run (smoke),23,E150
+b,Tasks gated to search after TTT,14,E150
+b,Complete contests (test outputs),14,E150
+b,"New correct answers (v6 right, v4 wrong)",0,E150
+a,already found by the floor's own 16 views (not plotted),4,E151
+a&b,rescuable tasks of (a) among the gated tasks of (b),7,E151 + E150
+b,NET (v6 right & v4 wrong) - (v4 right & v6 wrong),0,E150

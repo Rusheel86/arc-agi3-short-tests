@@ -1,0 +1,2398 @@
+# E097: harness v3 (facts switches + the timeout fix)
+# What it does: Adds four harness-computed fact lines (all OFF in E098/E154: no measured gain) and the retained-functions timeout fix (ARC3_KEEP_FUNCS_ON_TIMEOUT=1, ON: a 30-second tool timeout no longer wipes the game's saved helper functions).
+# Applies to: the Duck harness source tree (ARC3-Inference/...), after Franzen's harness-changes.patch and the
+#   patches numbered before this one, in this order (the order of the notebook's settings cell).
+# Files: ARC3-Inference/inference/agent/tool_agent.py, ARC3-Inference/inference/utils/harness_v3.py, ARC3-Inference/inference/utils/roguelike_map.py, ARC3-Inference/inference/utils/shape_motion.py
+# Source: notebook/arc3-e154-keepalive.ipynb, the `%%writefile /kaggle/e097-harness-v3.patch` cell (cell 11 of the original
+#   notebook, 12 after the licence header); the text below the header is that cell's body, byte for byte.
+# sha256 of the body: c826a8a8daa68dd1f3c2a331d0d8d317b73099a2dc1a98508cb4001e00c983d6
+# Licence: MIT-0 (see LICENSE). Apply with: python patches/apply_patches.py --harness <dir> (or git apply).
+
+diff --git a/ARC3-Inference/inference/agent/tool_agent.py b/ARC3-Inference/inference/agent/tool_agent.py
+index 5cbafde..46fe3ab 100644
+--- a/ARC3-Inference/inference/agent/tool_agent.py
++++ b/ARC3-Inference/inference/agent/tool_agent.py
+@@ -30,6 +30,10 @@ from inference.utils.animation import (
+ )
+ from inference.agent.action_names import reset_exposed, to_engine_action, to_model_action, undo_exposure_mode
+ from inference.utils.retained_functions import function_signature
++try:  # E097 harness v3 facts (flags ARC3_EVENT_LOG / _SURPRISE_LINE / _PROGRESS_LINE / _ROGUELIKE_MAP)
++    from inference.utils import harness_v3 as _harness_v3
++except Exception:  # noqa: BLE001
++    _harness_v3 = None
+ from inference.agent.prompts import (
+     apply_level_transfer_system_guidance,
+     LEVEL_START_USER_PROMPT,
+@@ -3638,6 +3642,8 @@ class ToolAgent:
+         runtime_dir = state_path.parent
+         if self._session_runtime_dir != runtime_dir:
+             self._session_runtime_dir = runtime_dir
++            self._v3_facts = None  # E097: per-game harness v3 facts state
++            self._v3_stats_path = state_path.with_name(state_path.name.replace("_tool_runtime_state.json", "") + "_harness_v3_stats.json")
+             self._priority_level_count_warned = False
+             if _persistent_functions():
+                 self._kept_functions = {}
+@@ -4646,6 +4652,13 @@ class ToolAgent:
+     def _record_retained_functions(self, sandbox_result, payload) -> None:
+         if not _persistent_functions():
+             return
++        if (_get_env_bool("ARC3_KEEP_FUNCS_ON_TIMEOUT", False)
++                and "keepable_functions" not in sandbox_result):
++            # E097 (C5): the sandbox timed out or crashed, so it reported no functions at all; that is not the
++            # model deleting them. Keep the retained library as it was (the old code wiped it: 6 of 6 timeouts
++            # in E081, 16 of 16 in E058).
++            self._v3_kept_on_timeout = getattr(self, "_v3_kept_on_timeout", 0) + 1
++            return
+         try:
+             previous = self._kept_functions
+             kept = {}
+@@ -4835,6 +4848,23 @@ class ToolAgent:
+             lines.append(f"Current state: step {step}, level {level}.")
+         return lines
+ 
++    def _harness_v3_lines(self, history_entries: list[HistoryEntry]) -> list[str]:
++        """E097 harness v3: facts computed from the frames (events, surprise, progress, map); never raises."""
++        facts = getattr(self, "_v3_facts", None)
++        try:
++            if facts is None:
++                facts = self._v3_facts = _harness_v3.V3Facts()
++            out = facts.lines(history_entries)
++        except Exception as exc:  # noqa: BLE001
++            out = []
++            if facts is not None:
++                facts.stats["errors"] += 1
++                facts.stats["last_error"] = f"lines: {type(exc).__name__}: {str(exc)[:160]}"
++        if facts is not None:
++            facts.stats["kept_funcs_on_timeout"] = getattr(self, "_v3_kept_on_timeout", 0)
++            facts.write_stats(getattr(self, "_v3_stats_path", None))
++        return out
++
+     def _build_user_prompt(
+         self,
+         action_num: int,
+@@ -4911,6 +4941,8 @@ class ToolAgent:
+                 if animation_line:
+                     lines.append(animation_line)
+                 self._prepare_animation_image(previous_step_summary)
++            if normalized_count and _harness_v3 is not None and _harness_v3.enabled():
++                lines.extend(self._harness_v3_lines(history_entries))
+             no_op_stops = previous_step_summary.get("no_op_stops") or []
+             for stop in no_op_stops[:3]:
+                 skipped = stop.get("skipped") or []
+diff --git a/ARC3-Inference/inference/utils/harness_v3.py b/ARC3-Inference/inference/utils/harness_v3.py
+new file mode 100644
+index 0000000..f8c5986
+--- /dev/null
++++ b/ARC3-Inference/inference/utils/harness_v3.py
+@@ -0,0 +1,461 @@
++"""Harness v3 patch set 1 (ledger E097): facts the harness computes from the frames, added to the turn opener.
++
++Plain words: after each sequence of actions the model is told, in a few lines, what its actions did, computed by
++the harness from the frames it already has: which objects moved (with ids that stay the same through a level),
++whether its own avatar moved, turned or did not move and what blocked it, which object the keys control after a
++click, when an action did something unlike every earlier use of it on this level (a surprise), what has changed
++since the level started, and, where the game moves on a regular lattice, a small ASCII map of the board. No advice
++and no instructions: facts only (design rule "bind, don't tell", reports/harness_v3_design_2026-10-13.md).
++
++Flags (read at call time, all off by default):
++    ARC3_EVENT_LOG      events block (avatar line, object motions / recolours / appear / vanish, control mode)
++    ARC3_SURPRISE_LINE  one line when an action's effect differs from every earlier effect of it on the level
++    ARC3_PROGRESS_LINE  net change since the level start, only when it changed
++    ARC3_ROGUELIKE_MAP  the semantic map on the motion lattice, only where its per-level fidelity gate passes
++Nothing here may raise into the game loop: the caller wraps every call; errors are counted in the stats.
++Sources: shape_motion.py (E095) and roguelike_map.py (E096), ported unchanged from analysis/.
++"""
++from __future__ import annotations
++
++import json
++import os
++import re
++import time
++
++from inference.utils import shape_motion as SM
++
++FLAG_EVENTS = "ARC3_EVENT_LOG"
++FLAG_SURPRISE = "ARC3_SURPRISE_LINE"
++FLAG_PROGRESS = "ARC3_PROGRESS_LINE"
++FLAG_MAP = "ARC3_ROGUELIKE_MAP"
++FLAGS = (FLAG_EVENTS, FLAG_SURPRISE, FLAG_PROGRESS, FLAG_MAP)
++
++DIRS = {"UP": (-1, 0), "DOWN": (1, 0), "LEFT": (0, -1), "RIGHT": (0, 1)}
++MAX_EVENT_LINES = 8
++MAX_SURPRISE_LINES = 2
++MAP_MAX_CHARS = 1000          # ~400 tokens at the measured ~2.5 characters per token of a map (E096)
++SAMPLE_EVERY, MAX_SAMPLES = 5, 40  # emitted texts kept in the stats file for token counting
++MAP_MIN_POSITIONS = 8         # avatar positions seen on the level before the lattice offset is trusted
++EDGE_BAND = 4                 # the harness's edge band: timer / step bars live here (gameplay_changed ignores it)
++STATS_SUFFIX = "_harness_v3_stats.json"
++EVENTS_LEGEND = ("Events (computed by the harness from the frames; #n = the same object through this level; "
++                 "shifts are (rows, cols) in pixels):")
++
++
++def flag(name: str) -> bool:
++    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
++
++
++def enabled() -> bool:
++    return any(flag(f) for f in FLAGS)
++
++
++def _action_key(action: str) -> str:
++    s = str(action or "").strip().upper()
++    if s.startswith("MOUSE") or s.startswith("CLICK") or "ROW=" in s:
++        return "CLICK"
++    s = s.split("(")[0].strip()
++    return {"ACTION1": "UP", "ACTION2": "DOWN", "ACTION3": "LEFT", "ACTION4": "RIGHT", "ACTION5": "SPACE",
++            "ACTION6": "CLICK", "ACTION7": "UNDO"}.get(s, s)
++
++
++def _click_cell(action: str):
++    m = re.search(r"row\s*=\s*(-?\d+)\s*,\s*col\s*=\s*(-?\d+)", str(action or ""), re.I)
++    return (int(m.group(1)), int(m.group(2))) if m else None
++
++
++def _shift(v) -> str:
++    return f"({v[0]:+d},{v[1]:+d})"
++
++
++def _rows(grid):
++    return [list(r) for r in grid]
++
++
++class V3Facts:
++    """Per-game state; feed it the harness's full history each turn (it only reads entries it has not seen)."""
++
++    def __init__(self):
++        self.n_seen = 0
++        self.tracker = None
++        self.map = None
++        self.level = None
++        self.start_frame = None
++        self.start_cells = {}
++        self.effects = {}
++        self.controlled = None
++        self.after_click = False
++        self.last_progress = None
++        self.last_map = None
++        self.legend_shown = False
++        self.last_key, self.last_out = None, []
++        self.stats = {"turns": 0, "transitions": 0, "events_blocks": 0, "event_lines": 0, "avatar_lines": 0,
++                      "control_lines": 0, "surprises": 0, "progress_lines": 0, "maps_shown": 0,
++                      "map_gate_failed": 0, "map_too_long": 0, "map_unchanged": 0, "errors": 0, "last_error": "", "cpu_seconds": 0.0,
++                      # E097 gate: executed non-RESET actions seen, and those itemised (or counted) in an Events block
++                      "actions": 0, "actions_in_events": 0, "emitted_turns": 0, "chars_out": 0, "samples": [],
++                      "repeat_calls": 0}
++
++    # ---- level bookkeeping
++    def _new_level(self, frame):
++        self.level = getattr(frame, "level", None)
++        self.tracker = SM.Tracker()
++        self.tracker.reset(_rows(frame.grid))
++        self.start_frame = _rows(frame.grid)
++        self.start_cells = {oid: frozenset(cs) for oid, cs in self.tracker.objects.items()}
++        self.effects = {}
++        self.controlled = None
++        self.after_click = False
++        self.last_progress = None
++        if flag(FLAG_MAP):
++            self._map_new_level(frame)
++
++    def _map_new_level(self, frame):
++        try:
++            import numpy as np
++            from inference.utils import roguelike_map as RM
++            if self.map is None:
++                self.map = RM.MapTracker()
++                self.map.reset_level(np.asarray(frame.grid), getattr(frame, "level", 1))
++            else:
++                self.map.reset_level(np.asarray(frame.grid), getattr(frame, "level", None))
++        except Exception as exc:  # noqa: BLE001
++            self._err("map level", exc)
++            self.map = None
++
++    def _err(self, where, exc):
++        self.stats["errors"] += 1
++        self.stats["last_error"] = f"{where}: {type(exc).__name__}: {str(exc)[:160]}"
++
++    # ---- one transition
++    def _blocked_by(self, avatar_id, d):
++        cells = self.tracker.objects.get(avatar_id) or set()
++        if not cells:
++            return None
++        H = len(self.tracker_frame)
++        W = len(self.tracker_frame[0]) if H else 0
++        ahead = {(r + d[0], c + d[1]) for r, c in cells} - set(cells)
++        if any(not (0 <= r < H and 0 <= c < W) for r, c in ahead):
++            return "the board edge"
++        hits = [oid for oid, cs in self.tracker.objects.items() if oid != avatar_id and cs & ahead]
++        if not hits:
++            return None
++        oid = min(hits, key=lambda o: len(self.tracker.objects[o]))
++        r, c = next(iter(self.tracker.objects[oid] & ahead))
++        colour = SM.COLOR_CHARS[self.tracker_frame[r][c]] if 0 <= self.tracker_frame[r][c] < 16 else "?"
++        return f"#{oid} (colour {colour})"
++
++    def _signature(self, key, st, result):
++        if result.get("game_over"):
++            return "ended the attempt (game over)"
++        if result.get("level_completed"):
++            return "completed the level"
++        if key in DIRS and st.get("avatar_state"):
++            s = st["avatar_state"]
++            return "did not move you" if s.startswith("did not move") else (
++                "moved you" if s.startswith("moved") else "turned/changed you in place")
++        res = st.get("res") or {}
++        if not res.get("changed_cells"):
++            return "changed nothing"
++        if st.get("moved"):
++            return "moved objects"
++        if st.get("recoloured"):
++            return "recoloured objects in place"
++        return "made cells appear/vanish"
++
++    def _transition(self, prev, entry):
++        act = str(entry.action or "")
++        key = _action_key(act)
++        result = entry.result if isinstance(entry.result, dict) else {}
++        rec = {"action": act, "key": key, "lines": [], "surprise": None, "avatar": None}
++        click_obj = None
++        if key == "CLICK":
++            cell = _click_cell(act)
++            if cell is not None:
++                hits = [oid for oid, cs in self.tracker.objects.items() if cell in cs]
++                click_obj = hits[0] if hits else None
++        self.tracker_frame = _rows(prev.grid)
++        before_objects = {oid: set(cs) for oid, cs in self.tracker.objects.items()}
++        st = self.tracker.step(act if key in DIRS else key, _rows(prev.grid), _rows(entry.frame.grid))
++        self.tracker_frame = _rows(entry.frame.grid)
++        if self.map is not None and flag(FLAG_MAP):
++            try:
++                import numpy as np
++                self.map.step(act, np.asarray(prev.grid), np.asarray(entry.frame.grid),
++                              completed=bool(result.get("level_completed")), game_over=bool(result.get("game_over")))
++            except Exception as exc:  # noqa: BLE001
++                self._err("map step", exc)
++        res = st.get("res") or {}
++        d = DIRS.get(key)
++        # avatar line (+ what blocked it)
++        if st.get("avatar_state"):
++            line = f"you (#{st['avatar']}): {st['avatar_state']}"
++            if st["avatar_state"].startswith("did not move") and d is not None:
++                self.tracker_frame = _rows(prev.grid)
++                saved = self.tracker.objects
++                self.tracker.objects = before_objects
++                try:
++                    by = self._blocked_by(st["avatar"], d)
++                finally:
++                    self.tracker.objects = saved
++                    self.tracker_frame = _rows(entry.frame.grid)
++                if by:
++                    line += f" (blocked by {by})"
++            rec["avatar"] = line
++        # control mode after a click
++        if key == "CLICK":
++            self.after_click = True
++        elif d is not None and st.get("key_moved"):
++            ks = frozenset(st["key_moved"])
++            if self.controlled is not None and ks != self.controlled and self.after_click:
++                rec["control"] = ("keys now move " + ", ".join(f"#{k}" for k in sorted(ks)) +
++                                  " (before your click: " + ", ".join(f"#{k}" for k in sorted(self.controlled)) + ")")
++            self.controlled = ks
++            self.after_click = False
++        rec["st"] = st
++        # surprise
++        skey = key if key != "CLICK" else (f"click on #{click_obj}" if click_obj else "click on an empty cell")
++        sig = self._signature(key, st, result)
++        prior = self.effects.setdefault(skey, [])
++        if len(prior) >= 2 and len(set(prior)) == 1 and sig != prior[0]:
++            rec["surprise"] = f"SURPRISE: {skey} {sig} (before: {prior[0]}, {len(prior)} of {len(prior)} times)"
++        prior.append(sig)
++        rec["sig"] = sig
++        return rec
++
++    # ---- rendering
++    def _compact(self, i, rec):
++        st = rec.get("st") or {}
++        res = st.get("res") or {}
++        parts = []
++        if rec.get("avatar"):
++            parts.append(rec["avatar"])
++        names = st.get("names") or {}
++        others = []
++        for j, e in enumerate(res.get("motions") or []):
++            lab = names.get(("m", j)) or (f"{e['dots']} dots" if e.get("dots") else f"shape {e.get('colours')}")
++            if st.get("avatar") and lab.startswith(f"#{st['avatar']} "):
++                continue
++            others.append(f"{lab.split(' (')[0]} moved {_shift(e['shift'])}")
++        for j, e in enumerate(res.get("recolours") or []):
++            lab = names.get(("r", j)) or f"{e['cells']} cells"
++            others.append(f"{lab.split(' (')[0]} recoloured")
++        n_reg = len(res.get("regions") or [])
++        if n_reg:
++            others.append(f"{n_reg} other change{'s' if n_reg > 1 else ''}")
++        if others:
++            parts.append("; ".join(others[:4]) + (f"; +{len(others) - 4} more" if len(others) > 4 else ""))
++        if rec.get("control"):
++            parts.append(rec["control"])
++        if not parts:
++            parts.append("no change" if not res.get("changed_cells") else "changed")
++        return f"{i}. {rec['action']}: " + "; ".join(parts)
++
++    def _events_lines(self, recs):
++        if not recs:
++            return []
++        out = []
++        if len(recs) == 1:
++            rec = recs[0]
++            st = rec.get("st") or {}
++            body = SM.render_tracked(st, max_lines=MAX_EVENT_LINES - 1) if st else ""
++            body_lines = [l for l in body.split("\n") if l.strip()]
++            # the prototype's own avatar sentence is replaced by ours (it carries the blocker)
++            body_lines = [l for l in body_lines if not l.startswith(("Your avatar (", "Shape motion:"))]
++            if rec.get("avatar"):
++                body_lines.insert(0, rec["avatar"])
++            if rec.get("control"):
++                body_lines.append(rec["control"])
++            if not body_lines:
++                body_lines = ["no change on the board"]
++            first = body_lines[0][2:] if body_lines[0].startswith("- ") else body_lines[0]
++            out = [f"{rec['action']}: " + first] + body_lines[1:MAX_EVENT_LINES]
++        else:
++            n = len(recs)
++            keep = list(range(n)) if n <= MAX_EVENT_LINES else list(range(3)) + list(range(n - (MAX_EVENT_LINES - 4), n))
++            for k, i in enumerate(keep):
++                out.append(self._compact(i + 1, recs[i]))
++                if len(recs) > MAX_EVENT_LINES and k == 2:
++                    out.append(f"... {len(recs) - (MAX_EVENT_LINES - 1)} actions not itemised ...")
++        head = EVENTS_LEGEND if not self.legend_shown else "Events:"
++        self.legend_shown = True
++        self.stats["avatar_lines"] += sum(1 for r in recs if r.get("avatar"))
++        self.stats["control_lines"] += sum(1 for r in recs if r.get("control"))
++        return [head] + out
++
++    def _progress_line(self, frame):
++        if self.start_frame is None:
++            return None
++        g = _rows(frame.grid)
++        H, W = len(g), len(g[0]) if g else 0
++        if H != len(self.start_frame) or W != len(self.start_frame[0]):
++            return None
++        inner = edge = 0
++        for r in range(H):
++            row, srow = g[r], self.start_frame[r]
++            for c in range(W):
++                if row[c] != srow[c]:
++                    if EDGE_BAND <= r < H - EDGE_BAND and EDGE_BAND <= c < W - EDGE_BAND:
++                        inner += 1
++                    else:
++                        edge += 1
++        moved = sum(1 for oid, cs in self.start_cells.items()
++                    if frozenset(self.tracker.objects.get(oid, ())) != cs)
++        key = (moved, inner, bool(edge))
++        if key == self.last_progress:
++            return None
++        self.last_progress = key
++        if not inner and not edge:
++            return "Since this level started: the board is back to its start state."
++        return (f"Since this level started: {moved} of {len(self.start_cells)} starting objects have moved or "
++                f"changed; {inner} cells inside the board differ from the start"
++                + ("; the edge bars changed" if edge else "") + ".")
++
++    def _map_text(self, frame):
++        if self.map is None:
++            return None
++        import numpy as np
++        from inference.utils import roguelike_map as RM
++        m = self.map
++        q = m.q
++        if not q or q < 2:
++            self.stats["map_gate_failed"] += 1
++            return None
++        _, _, share, _ = RM.quantum_from_magnitudes(m.mags)
++        off, stab = m.offset_for(q)
++        if (share is None or share < 0.8 or stab is None or stab < 0.9 or off is None
++                or len(getattr(m, "avatar_tl", []) or []) < MAP_MIN_POSITIONS):
++            self.stats["map_gate_failed"] += 1
++            return None
++        g = np.asarray(frame.grid)
++        f_tile, f_occ = RM.fidelity(g, q, off, m._floor_set(g), m.hud_mask(g.shape))
++        # stricter than E096's level-end rule (F_tile >= 0.75 OR F_occ >= 0.9): online, re86's diagonal shapes pass
++        # the occupancy test early in a level although the level as a whole is not faithful; a cell map is only
++        # shown when the board looks the same at cell resolution
++        if not f_tile >= 0.75:
++            self.stats["map_gate_failed"] += 1
++            return None
++        text = m.render(g)
++        if not text:
++            return None
++        if len(text) > MAP_MAX_CHARS:
++            self.stats["map_too_long"] += 1
++            return None
++        if text == self.last_map:
++            self.stats["map_unchanged"] += 1
++            return None
++        self.last_map = text
++        return text
++
++    # ---- entry point
++    def lines(self, history_entries) -> list[str]:
++        hist = [e for e in (history_entries or []) if getattr(e, "frame", None) is not None]
++        key = (len(hist), getattr(hist[-1].frame, "step", None), str(hist[-1].action)) if hist else None
++        if key is not None and key == self.last_key:
++            # the same history again: the harness rolls a turn back after a request failure and replays it (analyze
++            # builds the opener anew); give it what this history produced the first time, not an empty block
++            self.stats["repeat_calls"] += 1
++            return list(self.last_out)
++        t0 = time.thread_time()
++        try:
++            out = self._lines(hist)
++        finally:
++            self.stats["cpu_seconds"] = round(self.stats["cpu_seconds"] + time.thread_time() - t0, 3)
++        self.last_key, self.last_out = key, list(out)
++        return out
++
++    def _lines(self, history_entries) -> list[str]:
++        hist = [e for e in (history_entries or []) if getattr(e, "frame", None) is not None]
++        self.stats["turns"] += 1
++        if not hist:
++            return []
++        if len(hist) < self.n_seen or self.tracker is None:
++            self.n_seen = 0
++        if self.n_seen == 0:
++            self._new_level(hist[0].frame)
++            self.n_seen = 1
++        recs = []
++        for i in range(self.n_seen, len(hist)):
++            prev, entry = hist[i - 1], hist[i]
++            key = _action_key(entry.action)
++            result = entry.result if isinstance(entry.result, dict) else {}
++            level_changed = getattr(prev.frame, "level", None) != getattr(entry.frame, "level", None)
++            if key != "RESET":
++                self.stats["actions"] += 1
++            if key == "RESET":
++                # a level restart (also the automatic one after a game over): same level, start board again
++                self.tracker = SM.Tracker()
++                self.tracker.reset(_rows(entry.frame.grid))
++                self.start_cells = {oid: frozenset(cs) for oid, cs in self.tracker.objects.items()}
++                self.start_frame = _rows(entry.frame.grid)
++                self.last_progress = None
++                if self.map is not None and flag(FLAG_MAP):
++                    try:
++                        import numpy as np
++                        self.map.step("RESET", np.asarray(prev.frame.grid), np.asarray(entry.frame.grid))
++                    except Exception as exc:  # noqa: BLE001
++                        self._err("map reset", exc)
++                continue
++            try:
++                rec = self._transition(prev.frame, entry)
++                recs.append(rec)
++                self.stats["transitions"] += 1
++            except Exception as exc:  # noqa: BLE001
++                self._err("transition", exc)
++                self.tracker = None
++            if level_changed or result.get("level_completed"):
++                self._new_level(entry.frame)
++            elif self.tracker is None:
++                self._new_level(entry.frame)
++        self.n_seen = len(hist)
++        out = []
++        if flag(FLAG_EVENTS) and recs:
++            ev = self._events_lines(recs)
++            if ev:
++                out.extend(ev)
++                self.stats["events_blocks"] += 1
++                self.stats["actions_in_events"] += len(recs)
++                self.stats["event_lines"] += len(ev) - 1
++        if flag(FLAG_SURPRISE):
++            sur = [r["surprise"] for r in recs if r.get("surprise")][:MAX_SURPRISE_LINES]
++            out.extend(sur)
++            self.stats["surprises"] += len(sur)
++        cur = hist[-1].frame
++        if flag(FLAG_PROGRESS) and recs:
++            try:
++                pl = self._progress_line(cur)
++            except Exception as exc:  # noqa: BLE001
++                self._err("progress", exc)
++                pl = None
++            if pl:
++                out.append(pl)
++                self.stats["progress_lines"] += 1
++        if flag(FLAG_MAP) and recs:
++            try:
++                mt = self._map_text(cur)
++            except Exception as exc:  # noqa: BLE001
++                self._err("map", exc)
++                mt = None
++            if mt:
++                out.append(mt)
++                self.stats["maps_shown"] += 1
++        if out:
++            text = "\n".join(out)
++            self.stats["emitted_turns"] += 1
++            self.stats["chars_out"] += len(text)
++            # every SAMPLE_EVERY-th emitted text, up to MAX_SAMPLES: the results cell counts their tokens with the server's
++            # tokenizer and scales chars_out by the measured tokens per character
++            if self.stats["emitted_turns"] % SAMPLE_EVERY == 1 and len(self.stats["samples"]) < MAX_SAMPLES:
++                self.stats["samples"].append(text)
++        return out
++
++    def write_stats(self, path) -> None:
++        """path: this game's stats file (<run stem>_harness_v3_stats.json next to its runtime state)."""
++        try:
++            if path:
++                path = str(path)
++                with open(path + ".tmp", "w", encoding="utf-8") as f:
++                    json.dump(self.stats, f)
++                os.replace(path + ".tmp", path)
++        except Exception:  # noqa: BLE001
++            pass
+diff --git a/ARC3-Inference/inference/utils/roguelike_map.py b/ARC3-Inference/inference/utils/roguelike_map.py
+new file mode 100644
+index 0000000..7ad91f0
+--- /dev/null
++++ b/ARC3-Inference/inference/utils/roguelike_map.py
+@@ -0,0 +1,805 @@
++"""Roguelike map (E096): a semantic ASCII map of an ARC-AGI-3 board on the game's own MOTION lattice.
++
++Plain words: the player's step size (3 pixels in re86, 4 in wa30) is learned from the first moves. The board is cut
++into cells of that size, aligned to where the player stands, and each cell gets one character, like a Sokoban or
++NetHack map. The characters come from what happened, not from colours:
++    @  the object the arrow keys move (the avatar; several in mirror games)
++    #  a kind of cell that stopped the avatar (it pressed a key and did not move, with this ahead of it)
++    $  something that moved together with the avatar while touching it (pushed or carried)
++    &  something that moves by itself (a helper, an enemy)
++    .  floor (the background, or a colour revealed under the avatar when it moved away)
++    a d e f ...  every other kind of cell, one letter per colour, never interacted with (legend gives the colour
++                 in the harness's colour letters; the letters skip b c g p r w so they never read as colours)
++The image stays in the prompt; the map would be added as ~150-350 tokens of text.
++
++Pure functions, numpy (+ scipy.ndimage.label when present). Main API:
++    detect_shifts(prev, nxt)           greedy decomposition of a move's change into rigid axis-aligned shifts
++    MapTracker().reset_level(frame, level) / .step(action, prev, nxt, completed, game_over)
++                                       learns the quantum, offset, avatar, blockers, pushed and self-moving objects
++    MapTracker.render(frame)           -> map text (None until a quantum is known)
++    map_text(frames, actions)          the whole pipeline as one pure function of the history
++    quantum_from_magnitudes(mags)      q, k (first move with a repeated magnitude), constancy share
++    fidelity(frame, q, off, ...)       F_tile, F_occ (share of object pixels on lattice-aligned blocks)
++    click_grid(frame, ...)             regular object grid / zoom test for click games
++Colour letters follow the harness: ARC_COLOR_CHARS = "WwgGcBMPRbSYOrNp".
++"""
++import numpy as np
++
++try:
++    from scipy.ndimage import label as _scipy_label
++except Exception:  # pragma: no cover
++    _scipy_label = None
++
++COLOR_CHARS = "WwgGcBMPRbSYOrNp"
++DIRS = {"UP": (-1, 0), "DOWN": (1, 0), "LEFT": (0, -1), "RIGHT": (0, 1)}
++BAND = 4                 # the harness's edge band (gameplay_changed ignores it); timer bars live here
++MAX_SHIFT = 16
++MIN_CELLS = 4            # a shift must explain at least this many changed cells
++MAX_SHIFTS = 4           # shifts per move in the greedy decomposition
++CLASS_LETTERS = "adefhijklmnoqstuvxyz"   # lower-case letters that are NOT harness colour letters (b c g p r w)
++_S8 = np.ones((3, 3), bool)
++
++
++# ----------------------------------------------------------------------------------------------- basic helpers
++def mode_colour(g):
++    return int(np.bincount(np.asarray(g).ravel().astype(np.int64), minlength=16).argmax())
++
++
++def label8(mask):
++    """8-connected components of a bool mask -> (labels, n)."""
++    mask = np.asarray(mask, bool)
++    if _scipy_label is not None:
++        lab, n = _scipy_label(mask, structure=_S8)
++        return lab, int(n)
++    lab = np.zeros(mask.shape, np.int32)
++    n = 0
++    H, W = mask.shape
++    for r0, c0 in zip(*np.nonzero(mask)):
++        if lab[r0, c0]:
++            continue
++        n += 1
++        stack = [(r0, c0)]
++        lab[r0, c0] = n
++        while stack:
++            r, c = stack.pop()
++            for dr in (-1, 0, 1):
++                for dc in (-1, 0, 1):
++                    rr, cc = r + dr, c + dc
++                    if 0 <= rr < H and 0 <= cc < W and mask[rr, cc] and not lab[rr, cc]:
++                        lab[rr, cc] = n
++                        stack.append((rr, cc))
++    return lab, n
++
++
++def shifted(a, dr, dc, fill=-1):
++    """out[p] = a[p - (dr, dc)]; cells with no source get `fill`."""
++    a = np.asarray(a)
++    H, W = a.shape
++    out = np.full(a.shape, fill, dtype=np.int16 if a.dtype != bool else bool)
++    if abs(dr) >= H or abs(dc) >= W:
++        return out
++    out[max(dr, 0):H + min(dr, 0), max(dc, 0):W + min(dc, 0)] = a[max(-dr, 0):H + min(-dr, 0), max(-dc, 0):W + min(-dc, 0)]
++    return out
++
++
++def shift_mask(m, v):
++    return shifted(np.asarray(m, bool), v[0], v[1], fill=False)
++
++
++def dilate8(m):
++    m = np.asarray(m, bool)
++    out = m.copy()
++    for dr in (-1, 0, 1):
++        for dc in (-1, 0, 1):
++            if dr or dc:
++                out |= shift_mask(m, (dr, dc))
++    return out
++
++
++def interior(shape, band=BAND):
++    m = np.zeros(shape, bool)
++    m[band:shape[0] - band, band:shape[1] - band] = True
++    return m
++
++
++def bbox(mask):
++    rs, cs = np.nonzero(mask)
++    if not len(rs):
++        return None
++    return int(rs.min()), int(cs.min()), int(rs.max()), int(cs.max())
++
++
++def along_axis(v, d):
++    """v lies on the axis of direction d (either sign; mirrored movers count)."""
++    return (d[0] == 0 and v[0] == 0 and v[1] != 0) or (d[1] == 0 and v[1] == 0 and v[0] != 0)
++
++
++def same_sign(v, d):
++    return v[0] * d[0] + v[1] * d[1] > 0
++
++
++def norm_action(a):
++    """'UP' / 'DOWN' / 'LEFT' / 'RIGHT' / 'SPACE' / 'UNDO' / 'RESET' / 'CLICK' from harness or play-file spellings."""
++    s = str(a or "").strip().upper()
++    if s.startswith("MOUSE") or s.startswith("CLICK") or "ROW=" in s:
++        return "CLICK"
++    s = s.split("(")[0].strip()
++    return {"ACTION1": "UP", "ACTION2": "DOWN", "ACTION3": "LEFT", "ACTION4": "RIGHT", "ACTION5": "SPACE",
++            "ACTION6": "CLICK", "ACTION7": "UNDO"}.get(s, s)
++
++
++# ----------------------------------------------------------------------------------------------- shifts
++def detect_shifts(prev, nxt, max_shift=MAX_SHIFT, min_cells=MIN_CELLS, max_shifts=MAX_SHIFTS, band=BAND,
++                  purity=0.6):
++    """Greedy decomposition of the interior change of one move into rigid axis-aligned shifts.
++
++    A shift v explains a changed cell p if p was FILLED from v away (nxt[p] == prev[p - v] != bg) or VACATED by
++    something that went v away (prev[p] != bg and nxt[p + v] == prev[p]); bg = mode colour of prev. The shift with
++    the most explained cells wins (ties: the smaller |v|), its cells are removed, repeat. Returns a list of dicts:
++    v, explained (cells), footprint (bool mask of the moved object(s) in PREV coordinates, incl. unchanged overlap)."""
++    prev = np.asarray(prev).astype(np.int16)
++    nxt = np.asarray(nxt).astype(np.int16)
++    if prev.shape != nxt.shape:
++        return []
++    bg = mode_colour(prev)
++    remaining = (prev != nxt) & interior(prev.shape, band)
++    if not remaining.any():
++        return []
++    cands = [(s * dr, s * dc) for s in range(1, max_shift + 1) for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1))]
++    cache = {}
++    for v in cands:
++        ps = shifted(prev, v[0], v[1])           # prev[p - v]
++        nb = shifted(nxt, -v[0], -v[1])          # nxt[p + v]
++        cache[v] = ((nxt == ps) & (ps != bg) & (ps >= 0), (prev != bg) & (nb == prev), nb)
++    changed = prev != nxt
++    out = []
++    rejected = set()
++    for _ in range(max_shifts * 4):
++        best, best_n = None, 0
++        for v in cands:
++            if v in rejected:
++                continue
++            fill, vac, _nb = cache[v]
++            n = int(((fill | vac) & remaining).sum())
++            if n > best_n or (n == best_n and best is not None and abs(v[0]) + abs(v[1]) < abs(best[0]) + abs(best[1])):
++                best, best_n = v, n
++        if best is None or best_n < min_cells:
++            break
++        fill, vac, nb = cache[best]
++        filled = fill & remaining
++        vacated = vac & remaining
++        sources = vacated | shift_mask(filled, (-best[0], -best[1]))
++        bb = bbox(sources)
++        foot = np.zeros(prev.shape, bool)
++        if bb is not None:
++            r0, c0, r1, c1 = bb
++            M = np.zeros(prev.shape, bool)
++            M[r0:r1 + 1, c0:c1 + 1] = ((prev != bg) & (nb == prev))[r0:r1 + 1, c0:c1 + 1]
++            M |= sources
++            lab, n = label8(M)
++            keep = np.unique(lab[sources & (lab > 0)])
++            foot = np.isin(lab, keep[keep > 0])
++        # rigid-motion check, per same-colour part of the footprint: the cells a part left and the cells it newly
++        # covers must really have changed. A recolour in place (a box ring turning white when grabbed) or floor
++        # texture revealed behind a mover can mimic a shift from a same-coloured neighbour; such a "source" did not
++        # move, so its vacated cells are unchanged, and the part is dropped.
++        moved_to = shift_mask(foot, best)
++        keep_m = np.zeros(prev.shape, bool)
++        for col in np.unique(prev[foot]):
++            lab, n = label8(foot & (prev == col))
++            for i in range(1, n + 1):
++                part = lab == i
++                lp = part & ~moved_to
++                ap = shift_mask(part, best) & ~foot
++                if (lp.any() and changed[lp].mean() < purity) or (ap.any() and changed[ap].mean() < purity):
++                    continue
++                keep_m |= part
++        foot = keep_m
++        moved_to = shift_mask(foot, best)
++        left = foot & ~moved_to
++        arrived = moved_to & ~foot
++        expl = (filled | vacated) & (foot | moved_to)
++        if (not left.any() or not arrived.any() or changed[left].mean() < purity or changed[arrived].mean() < purity
++                or int(expl.sum()) < min_cells):
++            rejected.add(best)
++            continue
++        out.append({"v": best, "explained": int(expl.sum()), "footprint": foot})
++        remaining &= ~(expl | (changed & left))
++        if len(out) >= max_shifts or not remaining.any():
++            break
++    return out
++
++
++def explained_by(prev, nxt, shifts):
++    """Changed cells (whole board, band included) explained by the accepted shifts (filled or vacated rule)."""
++    prev = np.asarray(prev).astype(np.int16)
++    nxt = np.asarray(nxt).astype(np.int16)
++    bg = mode_colour(prev)
++    ch = prev != nxt
++    out = np.zeros(prev.shape, bool)
++    for s in shifts:
++        v = s["v"]
++        ps = shifted(prev, v[0], v[1])
++        nb = shifted(nxt, -v[0], -v[1])
++        out |= ch & (((nxt == ps) & (ps != bg) & (ps >= 0)) | ((prev != bg) & (nb == prev)))
++    return out
++
++
++def quantum_from_magnitudes(mags, first_n=8, min_moves=3):
++    """mags: list (per accepted direction move) of lists of key-axis shift magnitudes, in move order.
++    q = most common magnitude over the first `first_n` moves with any magnitude; k = index (1-based, among those
++    moves) at which some magnitude has first been seen twice; share = fraction of ALL magnitudes equal to q."""
++    moves = [m for m in mags if m]
++    if len(moves) < min_moves:
++        return None, None, None, len(moves)
++    head = [x for m in moves[:first_n] for x in m]
++    vals, counts = np.unique(head, return_counts=True)
++    q = int(vals[np.argmax(counts)])            # ties -> the smallest magnitude
++    seen, k = {}, None
++    for i, m in enumerate(moves, 1):
++        for x in m:
++            seen[x] = seen.get(x, 0) + 1
++            if seen[x] >= 2 and k is None:
++                k = i
++        if k is not None:
++            break
++    allm = [x for m in moves for x in m]
++    return q, k, float(np.mean([x == q for x in allm])), len(moves)
++
++
++# ----------------------------------------------------------------------------------------------- lattice geometry
++def lattice_edges(n, q, off):
++    """Cell boundaries along one axis of length n for cell size q and offset off (partial edge cells kept)."""
++    start = off % q
++    edges = list(range(start, n, q))
++    if start > 0:
++        edges = [0] + edges
++    return [(a, min(b, n)) for a, b in zip(edges, edges[1:] + [n]) if a < n]
++
++
++def _blocks(a, q, off, fill):
++    """Lattice cells of a 2-D array as (rows, cols, q*q); partial edge cells padded with `fill`."""
++    a = np.asarray(a)
++    H, W = a.shape
++    pt, pl = (q - off[0] % q) % q, (q - off[1] % q) % q
++    pb, pr = (-(H + pt)) % q, (-(W + pl)) % q
++    b = np.pad(a, ((pt, pb), (pl, pr)), constant_values=fill)
++    nr, nc = b.shape[0] // q, b.shape[1] // q
++    return b.reshape(nr, q, nc, q).transpose(0, 2, 1, 3).reshape(nr, nc, q * q)
++
++
++def fidelity(frame, q, off, floor=None, hud=None):
++    """F_tile: share of non-floor pixels lying in lattice cells that are entirely non-floor (lossless at cell size).
++    F_occ: share of non-floor pixels in cells occupied by exactly one 8-connected colour-agnostic component.
++    hud: bool mask of pixels to ignore (HUD rows/columns)."""
++    g = np.asarray(frame)
++    floor = {mode_colour(g)} if floor is None else set(floor)
++    keep = np.ones(g.shape, bool) if hud is None else ~hud
++    nf = ~np.isin(g, list(floor)) & keep
++    total = int(nf.sum())
++    if total == 0:
++        return 1.0, 1.0
++    lab, _ = label8(nf)
++    nfb = _blocks(nf, q, off, False)
++    kb = _blocks(keep, q, off, False)
++    lb = _blocks(np.where(nf, lab, 0), q, off, 0)
++    k = nfb.sum(-1)
++    tile = int(k[(k > 0) & (k == kb.sum(-1))].sum())
++    lmax = lb.max(-1)
++    lmin = np.where(lb > 0, lb, np.iinfo(np.int32).max).min(-1)
++    occ = int(k[(k > 0) & (lmax == lmin)].sum())
++    return tile / total, occ / total
++
++
++def best_offset(frame, q, floor=None, hud=None):
++    best, bs = (0, 0), -1.0
++    for orr in range(q):
++        for oc in range(q):
++            t, o = fidelity(frame, q, (orr, oc), floor, hud)
++            if t + o > bs + 1e-9:
++                best, bs = (orr, oc), t + o
++    return best
++
++
++def click_grid(frame, floor=None, hud=None, pitches=range(3, 17), min_aligned=5, min_share=0.6, zoom_share=0.95):
++    """Regular object grid at a level start (click games). Objects = 8-connected SAME-colour non-floor components
++    <= 25% of the board (HUD ignored). (a) some pitch p and offset align the top-left corners of >= min_aligned
++    objects and >= min_share of all objects; the largest such p within 95% of the best count is kept.
++    (b) zoom: >= zoom_share of the p x p blocks that hold non-floor pixels are one colour, some p >= 2."""
++    g = np.asarray(frame)
++    floor = {mode_colour(g)} if floor is None else set(floor)
++    keep = np.ones(g.shape, bool) if hud is None else ~hud
++    tl = []
++    for col in np.unique(g):
++        if int(col) in floor:
++            continue
++        lab, n = label8((g == col) & keep)
++        for i in range(1, n + 1):
++            m = lab == i
++            if m.sum() > g.size // 4:
++                continue
++            rs, cs = np.nonzero(m)
++            tl.append((int(rs.min()), int(cs.min()), int(rs.max()) - int(rs.min()) + 1, int(cs.max()) - int(cs.min()) + 1))
++    res = {"objects": len(tl), "grid": False, "pitch": None, "offset": None, "aligned": 0, "share": 0.0,
++           "zoom": None}
++    best = []
++    for p in pitches:
++        cnt = {}
++        for r, c, h, w in tl:
++            cnt[(r % p, c % p)] = cnt.get((r % p, c % p), 0) + 1
++        if cnt:
++            o, n = max(cnt.items(), key=lambda kv: kv[1])
++            best.append((p, o, n))
++    if best and tl:
++        top = max(n for _, _, n in best)
++        p, o, n = max([b for b in best if b[2] >= 0.95 * top], key=lambda b: b[0])
++        res.update(pitch=p, offset=o, aligned=n, share=n / len(tl))
++        res["grid"] = bool(n >= min_aligned and n / len(tl) >= min_share)
++    nf = ~np.isin(g, list(floor)) & keep
++    H, W = g.shape
++    for p in range(16, 1, -1):
++        for orr in range(p):
++            for oc in range(p):
++                nr, nc = (H - orr) // p, (W - oc) // p
++                gb = g[orr:orr + nr * p, oc:oc + nc * p].reshape(nr, p, nc, p).transpose(0, 2, 1, 3).reshape(nr, nc, -1)
++                ob = nf[orr:orr + nr * p, oc:oc + nc * p].reshape(nr, p, nc, p).any(axis=(1, 3))
++                occ = int(ob.sum())
++                if occ < 4:
++                    continue
++                uni = int(((gb == gb[..., :1]).all(-1) & ob).sum())
++                if uni / occ >= zoom_share:
++                    res["zoom"] = (p, (orr, oc))
++                    break
++            if res["zoom"]:
++                break
++        if res["zoom"]:
++            break
++    return res
++
++
++# ----------------------------------------------------------------------------------------------- tracker
++class Mover:
++    __slots__ = ("cells", "start", "avatar", "pushed", "selfmove", "axis_moves", "id")
++
++    def __init__(self, cells, mid):
++        self.cells = cells
++        self.start = cells.copy()
++        self.avatar = False
++        self.pushed = False
++        self.selfmove = False
++        self.axis_moves = 0
++        self.id = mid
++
++
++class MapTracker:
++    """Online learner over one game: per level the quantum q, the lattice offset, the avatar(s), blocker colours,
++    pushed and self-moving objects, floor colours, HUD rows/columns. Knowledge carries across levels as a prior
++    (q, blocker / pushed / self-mover colours, the avatar's sprite for a level-start guess)."""
++
++    def __init__(self):
++        self.level = None
++        self.q_prior = None
++        self.blockers, self.pushed_cols, self.self_cols = {}, set(), set()   # colour -> count (blockers)
++        self.avatar_sprite = None
++        self.level_count = 0
++        self._new_level(None, 1)
++
++    # ---- level bookkeeping
++    def _new_level(self, frame, level):
++        self.level = level
++        self.mags = []                  # per direction move: key-axis magnitudes
++        self.q = None
++        self.k = None
++        self.offset = None
++        self.offsets_seen = []          # avatar top-left mod q at each tracked position (after q known)
++        self.movers = []
++        self.next_id = 1
++        self.floor = None if frame is None else {mode_colour(frame)}
++        self.floor_learned = set()
++        self.hud_rows, self.hud_cols = set(), set()
++        self.selection_changed = False
++        self.start_frame = None if frame is None else np.asarray(frame).copy()
++        self.moves = 0
++        self.dir_moves = 0
++        self.first_avatar = None
++        self.avatar_tl = []             # first avatar's bbox top-left after each move (not touching the board edge)
++        self.events = []                # (move index, kind, detail)
++        self.sprite_guess = None
++        if frame is not None and self.avatar_sprite is not None:
++            self.sprite_guess = self._find_sprite(np.asarray(frame))
++
++    def reset_level(self, frame, level=None):
++        if self.q is not None:
++            self.q_prior = self.q
++        self._new_level(frame, (self.level + 1) if level is None else level)
++        self.level_count += 1
++
++    def lattice(self):
++        q = self.q or self.q_prior
++        if q is None or q < 2:
++            return None
++        off = self.offset
++        if off is None and self.sprite_guess is not None:
++            bb = bbox(self.sprite_guess)
++            off = (bb[0] % q, bb[1] % q)
++        return q, off
++
++    @property
++    def avatars(self):
++        return [m for m in self.movers if m.avatar]
++
++    def _find_sprite(self, g):
++        """Exact template match of the previous level's avatar sprite (colours on its mask)."""
++        mask, cols = self.avatar_sprite
++        h, w = mask.shape
++        H, W = g.shape
++        if h > H or w > W or mask.sum() < 4:
++            return None
++        rs, cs = np.nonzero(mask)
++        hits = []
++        first = cols[rs[0], cs[0]]
++        for r in range(H - h + 1):
++            for c in range(W - w + 1):
++                if g[r + rs[0], c + cs[0]] != first:
++                    continue
++                if np.array_equal(g[r:r + h, c:c + w][mask], cols[mask]):
++                    hits.append((r, c))
++                    if len(hits) > 4:
++                        return None
++        if not hits:
++            return None
++        out = np.zeros(g.shape, bool)
++        for r, c in hits:
++            out[r:r + h, c:c + w] |= mask
++        return out
++
++    # ---- learning
++    def _floor_set(self, g):
++        return self.floor_learned if self.floor_learned else {mode_colour(g)}
++
++    def _dominant(self, g, mask):
++        vals = g[mask]
++        vals = vals[~np.isin(vals, list(self._floor_set(g)))]
++        if not len(vals):
++            return None
++        return int(np.bincount(vals.astype(np.int64), minlength=16).argmax())
++
++    def _match_mover(self, comp):
++        best, bo = None, 0
++        for m in self.movers:
++            if m.avatar:
++                continue
++            o = int((m.cells & comp).sum())
++            if o > bo:
++                best, bo = m, o
++        if best is not None and bo >= 0.5 * min(comp.sum(), best.cells.sum()):
++            return best
++        return None
++
++    def _new_mover(self, cells):
++        m = Mover(cells.copy(), self.next_id)
++        self.next_id += 1
++        self.movers.append(m)
++        return m
++
++    def step(self, action, prev, nxt, completed=False, game_over=False):
++        """Learn from one move. Returns a dict describing what was inferred (for logs and tests)."""
++        act = norm_action(action)
++        prev = np.asarray(prev)
++        nxt = np.asarray(nxt)
++        info = {"action": act, "moved_avatars": [], "blocked": [], "pushed": [], "selfmove": [], "q": self.q}
++        self.moves += 1
++        if self.start_frame is None:
++            self.start_frame = prev.copy()
++            self.floor = {mode_colour(prev)}
++        if act == "RESET":
++            for m in self.movers:
++                m.cells = m.start.copy()
++            self.selection_changed = False
++            return info
++        if completed or game_over or prev.shape != nxt.shape:
++            return info
++        shifts = detect_shifts(prev, nxt)
++        d = DIRS.get(act)
++        moved = {}                       # mover id -> v
++        if d is not None:
++            self.dir_moves += 1
++            self.mags.append([abs(s["v"][0]) + abs(s["v"][1]) for s in shifts if along_axis(s["v"], d)])
++            if self.q is None:
++                q, k, share, n = quantum_from_magnitudes(self.mags, min_moves=1)
++                if q is not None and k is not None:
++                    self.q, self.k = q, self.moves
++        old_avatars = list(self.avatars)
++        candidates = []                  # (comp mask, v, mover or None)
++        for s in shifts:
++            v, fp = s["v"], s["footprint"]
++            rest = fp.copy()
++            for a in self.avatars:
++                if a.id in moved:
++                    continue
++                ov = int((a.cells & fp).sum())
++                if ov >= 0.6 * a.cells.sum():
++                    moved[a.id] = v
++                    rest &= ~a.cells
++                    if d is not None and not along_axis(v, d):
++                        # an "avatar" that moves off the key axis moves by itself (a helper that copied one move)
++                        a.avatar = False
++                        a.selfmove = True
++                        col = self._dominant(prev, a.cells)
++                        if col is not None:
++                            self.self_cols.add(col)
++                        info["selfmove"].append((a.id, v))
++            lab, n = label8(rest)
++            for i in range(1, n + 1):
++                comp = lab == i
++                if comp.sum() < 2:
++                    continue
++                m = self._match_mover(comp)
++                touching = (m is None or not m.selfmove) and any(
++                    moved.get(a.id) == v and (dilate8(a.cells) & comp).any() for a in self.avatars)
++                if touching:
++                    if m is None:
++                        m = self._new_mover(comp)
++                    m.pushed = True
++                    moved[m.id] = v
++                    col = self._dominant(prev, comp)
++                    if col is not None:
++                        self.pushed_cols.add(col)
++                    info["pushed"].append((m.id, v))
++                    continue
++                candidates.append((comp, v, m))
++        # classify candidates
++        new_avatars = []
++        unexpl = None
++        for comp, v, m in candidates:
++            if m is None:
++                # full sprite: add changed, non-background cells next to the moved part that no shift explains
++                # (an avatar seen for the first time while it also turns: its facing marker jumped)
++                if unexpl is None:
++                    unexpl = (prev != nxt) & (nxt != mode_colour(prev)) & ~explained_by(prev, nxt, shifts)
++                dest = shift_mask(comp, v)
++                lab, n = label8(unexpl | dest)
++                ids = np.unique(lab[dest])
++                full = np.isin(lab, ids[ids > 0])
++                m = self._new_mover(shift_mask(full, (-v[0], -v[1])) | comp)
++            moved[m.id] = v
++            if d is not None and along_axis(v, d) and not m.selfmove:
++                m.axis_moves += 1
++                if same_sign(v, d) or m.axis_moves >= 2:
++                    new_avatars.append(m)
++                continue
++            if act == "UNDO":
++                continue
++            m.selfmove = True
++            m.pushed = False
++            m.avatar = False
++            own = m.cells & comp
++            col = self._dominant(prev, own if own.any() else comp)
++            if col is not None:
++                self.self_cols.add(col)
++            info["selfmove"].append((m.id, v))
++        # avatar set update
++        if d is not None:
++            if new_avatars and self.selection_changed:
++                for a in old_avatars:
++                    if a.id not in moved:
++                        a.avatar = False
++            for m in new_avatars:
++                if not m.avatar:
++                    m.avatar = True
++                    if self.first_avatar is None:
++                        self.first_avatar = m.id
++            for a in self.avatars:
++                if a.id in moved:
++                    info["moved_avatars"].append((a.id, moved[a.id]))
++                elif a in old_avatars:
++                    # blocked: what lies ahead (one quantum deep)
++                    depth = self.q or self.q_prior or 1
++                    ahead = np.zeros(prev.shape, bool)
++                    for j in range(1, depth + 1):
++                        ahead |= shift_mask(a.cells, (d[0] * j, d[1] * j))
++                    ahead &= ~a.cells
++                    col = self._dominant(prev, ahead) if ahead.any() else None
++                    info["blocked"].append((a.id, col))
++                    if col is not None:
++                        self.blockers[col] = self.blockers.get(col, 0) + 1
++            self.selection_changed = False
++        elif act in ("SPACE", "CLICK"):
++            self.selection_changed = True
++        # translate movers; remember where things went (for floor and HUD learning)
++        covered = np.zeros(prev.shape, bool)
++        for s in shifts:
++            covered |= shift_mask(s["footprint"], s["v"])
++        vacated = []
++        before = {}
++        for m in self.movers:
++            v = moved.get(m.id)
++            if v is not None:
++                before[m.id] = m.cells
++                if m.avatar:
++                    vacated.append(m.cells & ~shift_mask(m.cells, v))
++                m.cells = shift_mask(m.cells, v)
++        # floor learning: cells an avatar left that nothing else moved onto
++        for vac in vacated:
++            vac = vac & ~covered
++            if vac.sum() >= 2:
++                bc = np.bincount(nxt[vac].astype(np.int64), minlength=16)
++                if bc.max() >= 0.6 * vac.sum():
++                    self.floor_learned.add(int(bc.argmax()))
++        # HUD: band changes that no accepted shift explains and no mover covers; a changed pixel marks its band
++        # row, or (only when it is not in a row band) its band column
++        band_ch = (prev != nxt) & ~interior(prev.shape)
++        if band_ch.any():
++            cover = explained_by(prev, nxt, shifts)
++            for m in self.movers:
++                cover |= dilate8(m.cells | before.get(m.id, m.cells))
++            rs, cs = np.nonzero(band_ch & ~cover)
++            H, W = prev.shape
++            for r, c in zip(rs, cs):
++                if r < BAND or r >= H - BAND:
++                    self.hud_rows.add(int(r))
++                elif c < BAND or c >= W - BAND:
++                    self.hud_cols.add(int(c))
++        # offset, sprite
++        av = self.avatars
++        for x in av:                     # every avatar that moved on this move (one shared lattice)
++            if x.id not in moved:
++                continue
++            bb = bbox(x.cells)
++            if bb is not None and bb[0] > 0 and bb[1] > 0 and bb[2] < nxt.shape[0] - 1 and bb[3] < nxt.shape[1] - 1:
++                self.avatar_tl.append((bb[0], bb[1]))
++        if av and self.q:
++            a = next((x for x in av if x.id == self.first_avatar), av[0])
++            bb = bbox(a.cells)
++            if bb is not None:
++                if self.offset is None:
++                    o, _ = self.offset_for(self.q)
++                    if o is not None:
++                        self.offset = o
++                    else:
++                        self.offset = best_offset(self.start_frame, self.q, self._floor_set(self.start_frame),
++                                                  self.hud_mask(nxt.shape))
++                if bb[0] > 0 and bb[1] > 0:
++                    self.offsets_seen.append((bb[0] % self.q, bb[1] % self.q))
++            if a.cells.any():
++                r0, c0, r1, c1 = bbox(a.cells)
++                self.avatar_sprite = (a.cells[r0:r1 + 1, c0:c1 + 1].copy(), nxt[r0:r1 + 1, c0:c1 + 1].copy())
++        info["q"] = self.q
++        return info
++
++    def hud_mask(self, shape):
++        m = np.zeros(shape, bool)
++        for r in self.hud_rows:
++            m[r, :] = True
++        for c in self.hud_cols:
++            m[:, c] = True
++        return m
++
++    def offset_stability(self):
++        if not self.offsets_seen:
++            return None
++        o = self.offset
++        return float(np.mean([x == o for x in self.offsets_seen]))
++
++    def offset_for(self, q):
++        """(mode of the first avatar's top-left mod q, share of its tracked positions at that offset)."""
++        if not self.avatar_tl or not q:
++            return None, None
++        mods = [(r % q, c % q) for r, c in self.avatar_tl]
++        vals = {}
++        for m in mods:
++            vals[m] = vals.get(m, 0) + 1
++        o, n = max(vals.items(), key=lambda kv: kv[1])
++        return o, n / len(mods)
++
++    # ---- rendering
++    def glyph_grid(self, frame):
++        """-> (list of glyph rows, letter legend dict, row edges, col edges) on the current lattice, uncropped."""
++        lat = self.lattice()
++        if lat is None:
++            return None
++        q, off = lat
++        g = np.asarray(frame)
++        hud = self.hud_mask(g.shape)
++        floor = self._floor_set(g)
++        if off is None:                  # level start with a prior quantum and no avatar seen yet
++            off = best_offset(g, q, floor, hud)
++        self._render_off = off
++        nf = ~np.isin(g, list(floor)) & ~hud
++        av = np.zeros(g.shape, bool)
++        for a in self.avatars:
++            av |= a.cells
++        if not av.any() and self.sprite_guess is not None:
++            av = self.sprite_guess
++        pushed = np.zeros(g.shape, bool)
++        selfm = np.zeros(g.shape, bool)
++        for m in self.movers:
++            if m.avatar:
++                continue
++            if m.pushed:
++                pushed |= m.cells
++            elif m.selfmove:
++                selfm |= m.cells
++        blockers = {c for c, n in self.blockers.items()}
++        letters, legend = {}, {}
++        all_r = lattice_edges(g.shape[0], q, off[0])
++        all_c = lattice_edges(g.shape[1], q, off[1])
++        ri = [i for i, e in enumerate(all_r) if not all(r in self.hud_rows for r in range(*e))]
++        ci = [j for j, e in enumerate(all_c) if not all(c in self.hud_cols for c in range(*e))]
++        redges, cedges = [all_r[i] for i in ri], [all_c[j] for j in ci]
++        has_av = _blocks(av, q, off, False).any(-1)
++        has_p = _blocks(pushed, q, off, False).any(-1)
++        has_s = _blocks(selfm, q, off, False).any(-1)
++        cnt = np.stack([_blocks((g == c) & nf, q, off, False).sum(-1) for c in range(16)], -1)
++        occ = cnt.sum(-1) > 0
++        dom = cnt.argmax(-1)
++        rows = []
++        for i in ri:
++            line = []
++            for j in ci:
++                if has_av[i, j]:
++                    line.append("@")
++                elif has_p[i, j]:
++                    line.append("$")
++                elif has_s[i, j]:
++                    line.append("&")
++                elif not occ[i, j]:
++                    line.append(".")
++                else:
++                    col = int(dom[i, j])
++                    if col in self.pushed_cols:
++                        line.append("$")
++                    elif col in self.self_cols:
++                        line.append("&")
++                    elif col in blockers:
++                        line.append("#")
++                    else:
++                        if col not in letters:
++                            letters[col] = CLASS_LETTERS[len(letters)] if len(letters) < len(CLASS_LETTERS) else "?"
++                            legend[letters[col]] = legend.get(letters[col], []) + [COLOR_CHARS[col]]
++                        line.append(letters[col])
++            rows.append("".join(line))
++        return rows, legend, redges, cedges, letters
++
++    def render(self, frame, coords=True, crop=True):
++        gg = self.glyph_grid(frame)
++        if gg is None:
++            return None
++        rows, legend, redges, cedges, letters = gg
++        q = self.lattice()[0]
++        ri = [i for i, r in enumerate(rows) if r.strip(".")]
++        ci = [j for j in range(len(cedges)) if any(r[j] != "." for r in rows)]
++        if crop and ri and ci:
++            i0, i1, j0, j1 = ri[0], ri[-1], ci[0], ci[-1]
++        else:
++            i0, i1, j0, j1 = 0, len(rows) - 1, 0, len(cedges) - 1
++        body = [r[j0:j1 + 1] for r in rows[i0:i1 + 1]]
++        used = set("".join(body))
++        sem = [("@", "you"), ("#", "blocked you"), ("$", "moved with you"), ("&", "moves by itself"), (".", "floor")]
++        head = (f"MAP cell={q}px; cell (r,c) = pixel row {redges[i0][0]}+{q}r, col {cedges[j0][0]}+{q}c; "
++                f"{len(body)}x{len(body[0]) if body else 0}")
++        out = [head]
++        if coords:
++            out.append("   " + "".join(str(j % 10) for j in range(len(body[0]) if body else 0)))
++            out += [f"{i:2d} {r}" for i, r in enumerate(body)]
++        else:
++            out += body
++        key = "  ".join(f"{g} {t}" for g, t in sem if g in used)
++        cls = " ".join(f"{L}={''.join(sorted(set(cs)))}" for L, cs in sorted(legend.items()) if L in used)
++        out.append(key + (f"  | untouched, by colour: {cls}" if cls else ""))
++        return "\n".join(out)
++
++
++# ----------------------------------------------------------------------------------------------- pure pipeline
++def map_text(frames, actions, levels=None, completed=None, game_over=None, coords=True):
++    """Pure function: frames[0..n] (frames[i+1] = board after actions[i]) + actions -> map text of the last frame
++    (None when no quantum is known yet). levels[i] = level on which action i was taken (a change starts a new level
++    with frames[i+1] as its start board)."""
++    t = MapTracker()
++    t.reset_level(frames[0], levels[0] if levels else 1)
++    for i, a in enumerate(actions):
++        comp = bool(completed[i]) if completed else bool(levels and i + 1 < len(levels) and levels[i + 1] != levels[i])
++        t.step(a, frames[i], frames[i + 1], completed=comp, game_over=bool(game_over[i]) if game_over else False)
++        if comp:
++            t.reset_level(frames[i + 1], (levels[i + 1] if levels and i + 1 < len(levels) else None))
++    return t.render(frames[-1], coords=coords)
+diff --git a/ARC3-Inference/inference/utils/shape_motion.py b/ARC3-Inference/inference/utils/shape_motion.py
+new file mode 100644
+index 0000000..2283e57
+--- /dev/null
++++ b/ARC3-Inference/inference/utils/shape_motion.py
+@@ -0,0 +1,1033 @@
++"""Whole-shape motion between two frames, with stable object ids (E095, harness v3 mechanism C0).
++
++Plain words: the harness's object diff (vendor/franzen-m2/.../utils/frame_diff.py) cuts the board into
++4-connected SAME-COLOUR pieces. A diagonal shape (an X, a diamond outline) falls apart into single
++pixels, a two-colour box (wa30: ring + centre) into two pieces, and a move becomes dozens of
++appeared / disappeared / moved fragments. This module says instead "object #4 (45 cells) moved by
++(+3,0)", "#5 kept its place and changed colour c->G", "#1 and #3 moved together", "your avatar did not
++move", and lists only the changes no motion or recolour explains.
++
++Per move (shape_motion(prev, nxt)), stdlib only so the source could be spliced into the python sandbox
++like frame_diff.py:
++1. objects = 8-connected components over ALL non-background colours (colour-agnostic; diagonal
++   neighbours connect) that contain a changed cell; background = the frame's most common colour;
++   surfaces larger than a quarter of the board are skipped. Each object is matched by translation of
++   its whole footprint (cells that are non-background after the shift), candidate shifts from bbox
++   alignments with changed objects of the after frame, vacated->filled same-colour cell-pair votes and a
++   +-4 window. Accepted when >= 90% of the in-board cells land on non-background cells, the shift beats
++   staying put, and the cells it newly fills really changed in this move (a static look-alike does not
++   count). Colour differences under the accepted shift are kept as a separate recolour list on the
++   motion (e.g. a facing marker W moving inside an avatar). Shift 0 with an identical footprint =
++   "recoloured in place" (a turn, a highlight).
++2. fallback for cells of objects that did not match (typically a moving shape touching a static one, so
++   the colour-agnostic component mixes both): 8-connected SAME-colour primitives, matched by translation
++   colour-preservingly, then colour-agnostically (one new colour) = moved and recoloured; primitives of
++   <= 2 cells take the shift of a touching matched shape, a unique destination, or the common shift of a
++   group of same-colour dots.
++3. motions with the same shift whose parts touch merge into one entry (a plus and its white centre
++   marker; a player carrying a box); one-cell in-place recolours that swap a colour between two objects
++   are reported as a marker moving between them (re86's SPACE).
++4. changed cells no motion or recolour explains: 8-connected regions, reported as appeared /
++   disappeared / changed, largest first.
++
++Across moves (Tracker): stable ids for objects through a level ("#3"), carried along by the motions;
++"moved together" lists; an avatar guess (the object the arrow keys move in their own direction, recency
++weighted) and a per-move avatar line: moved (dr,dc) / turned in place / did not move.
++
++API: shape_motion(prev, nxt) -> dict; render(result) -> str; Tracker().reset(frame) / .step(action, prev,
++nxt) -> dict with 'res', 'ids', 'avatar'; render_tracked(step) -> str.
++Grids: 2-D sequences of ints (lists, tuples or numpy arrays). Colour letters follow the harness
++(ARC_COLOR_CHARS = "WwgGcBMPRbSYOrNp").
++"""
++
++COLOR_CHARS = "WwgGcBMPRbSYOrNp"
++_N8 = ((-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1))
++SURFACE_FRACTION = 0.25      # components larger than this share of the board are surfaces, not shapes
++KEEP = 0.9                   # share of a shape's in-board cells that must match after the shift
++PURITY = 0.8                 # share of a moved shape's vacated cells that must have changed (rigid move)
++PURITY_2B = 0.7              # stage 2b (a part of a same-colour structure): vacated and newly filled cells changed
++REST_CHANGED = 0.2           # stage 2b: at most this share of the structure's remaining cells may have changed
++PRIOR_KEEP = 0.6             # the same, for a shift already accepted for a larger shape this move (occluded pieces)
++WINDOW = 4                   # +-window of small shifts always tried
++SMALL = 2                    # primitives of <= SMALL cells use the marker / dot-group rules
++BIG_OBJECT = 32              # in-place recolours of larger objects are reported per cluster of changed cells
++DIRS = {"UP": (-1, 0), "DOWN": (1, 0), "LEFT": (0, -1), "RIGHT": (0, 1)}
++_DEBUG = None                # set to a list to record stage-2b candidates (threshold calibration only, E095)
++
++
++def _ch(v):
++    return COLOR_CHARS[max(0, min(15, int(v)))]
++
++
++def _as_rows(g):
++    if hasattr(g, "tolist"):
++        g = g.tolist()
++    return [list(map(int, row)) for row in g]
++
++
++def _mode_colour(grid):
++    counts = {}
++    for row in grid:
++        for v in row:
++            counts[v] = counts.get(v, 0) + 1
++    return max(counts.items(), key=lambda kv: kv[1])[0]
++
++
++def _flood(grid, start, same, seen):
++    H, W = len(grid), len(grid[0])
++    stack = [start]
++    seen.add(start)
++    cells = []
++    while stack:
++        r, c = stack.pop()
++        cells.append((r, c))
++        for dr, dc in _N8:
++            nr, nc = r + dr, c + dc
++            if 0 <= nr < H and 0 <= nc < W and (nr, nc) not in seen and same(grid[nr][nc]):
++                seen.add((nr, nc))
++                stack.append((nr, nc))
++    return cells
++
++
++def _objects(grid, seeds, bg, max_size, exclude=frozenset()):
++    """8-connected colour-agnostic components of non-background cells containing a seed cell."""
++    seen = set(exclude)
++    out = []
++    for s in sorted(seeds):
++        if s in seen or grid[s[0]][s[1]] == bg:
++            continue
++        cells = _flood(grid, s, lambda x: x != bg, seen)
++        if len(cells) <= max_size:
++            out.append(cells)
++    return out
++
++
++def _primitives(grid, seeds, bg, max_size, exclude=frozenset()):
++    """8-connected same-colour components containing a seed cell (not the background)."""
++    seen = set(exclude)
++    out = []
++    for s in sorted(seeds):
++        if s in seen:
++            continue
++        k = grid[s[0]][s[1]]
++        if k == bg:
++            continue
++        cells = _flood(grid, s, lambda x, k=k: x == k, seen)
++        if len(cells) <= max_size:
++            out.append({"colour": k, "cells": cells})
++    return out
++
++
++def _flood_set(start, allowed, seen):
++    """8-connected cells of the set `allowed` reachable from start (marks them in seen)"""
++    stack = [start]
++    seen.add(start)
++    out = []
++    while stack:
++        r, c = stack.pop()
++        out.append((r, c))
++        for dr, dc in _N8:
++            t = (r + dr, c + dc)
++            if t in allowed and t not in seen:
++                seen.add(t)
++                stack.append(t)
++    return out
++
++
++def _bbox(cells):
++    rs = [r for r, _ in cells]
++    cs = [c for _, c in cells]
++    return (min(rs), min(cs), max(rs), max(cs))
++
++
++def _norm(cells):
++    r0, c0, _, _ = _bbox(cells)
++    return frozenset((r - r0, c - c0) for r, c in cells)
++
++
++def _touches(cells_a, set_b):
++    return any((r + dr, c + dc) in set_b for r, c in cells_a for dr, dc in _N8)
++
++
++_NEAR2 = tuple((dr, dc) for dr in range(-2, 3) for dc in range(-2, 3) if (dr, dc) != (0, 0))
++
++
++def _near(cells_a, set_b):
++    """within 2 cells (Chebyshev): bridges a one-cell occlusion gap (a line drawn over the moving shape)"""
++    return any((r + dr, c + dc) in set_b for r, c in cells_a for dr, dc in _NEAR2)
++
++
++def _pick(valid, prior):
++    """valid: list of (key, v, ...); prefer a shift already accepted for a larger shape (self-similar pieces of
++    a line otherwise match a wrong shift along their own direction)"""
++    if not valid:
++        return None
++    pv = [x for x in valid if x[1] in prior]
++    return max(pv or valid, key=lambda x: x[0])
++
++
++def shape_motion(prev, nxt):
++    a, b = _as_rows(prev), _as_rows(nxt)
++    if len(a) != len(b) or (a and len(a[0]) != len(b[0])):
++        return {"error": "frame shape changed", "changed_cells": -1}
++    H = len(a)
++    W = len(a[0]) if H else 0
++    changed = {(r, c) for r in range(H) for c in range(W) if a[r][c] != b[r][c]}
++    out = {"changed_cells": len(changed), "background": _ch(_mode_colour(a)) if H else None,
++           "motions": [], "recolours": [], "markers": [], "regions": [], "explained_cells": 0}
++    if not changed:
++        return out
++    bg = _mode_colour(a)
++    bg_b = _mode_colour(b)
++    max_size = int(SURFACE_FRACTION * H * W)
++
++    def inb(r, c):
++        return 0 <= r < H and 0 <= c < W
++
++    filled_by_colour = {}
++    for (r, c) in changed:
++        filled_by_colour.setdefault(b[r][c], []).append((r, c))
++    after_objs = []
++    for cells in _objects(b, changed, bg_b, max_size):
++        after_objs.append({"cells": cells, "bbox": _bbox(cells), "norm": _norm(cells),
++                           "colours": {b[r][c] for r, c in cells}})
++
++    _sizes = {}
++
++    def _comp_size_a(t):
++        """size of the 8-connected same-colour component of the BEFORE frame containing cell t (cached)"""
++        if t not in _sizes:
++            k = a[t[0]][t[1]]
++            comp = _flood(a, t, lambda x, k=k: x == k, set())
++            for x in comp:
++                _sizes[x] = len(comp)
++        return _sizes[t]
++
++    def arrival_ok(cells, v, colour_ok):
++        """cells the shift newly fills (outside the shape's own footprint) must have changed in this move (>= PURITY;
++        a uniform block 'moving' into a larger region of its own colour fills cells that were already that colour)"""
++        dr, dc = v
++        own = set(cells)
++        new = [(r + dr, c + dc) for r, c in cells
++               if inb(r + dr, c + dc) and (r + dr, c + dc) not in own and colour_ok(b[r + dr][c + dc], a[r][c])]
++        if not new:
++            return True
++        size = len(cells)
++        ok = 0
++        for t in new:
++            if t in changed or 2 * _comp_size_a(t) <= size:
++                ok += 1     # unchanged but part of a piece no larger than the shape: a swap partner (dc22)
++        return ok >= PURITY * len(new)
++
++    def vacated_ok(cells, v):
++        """a rigid move changes (almost) every cell it leaves; a region that only grew on one side does not"""
++        own = set(cells)
++        if not any((r + v[0], c + v[1]) in own for r, c in cells):
++            return True     # the shape cleared its old footprint: another object may refill it (a swap)
++        vac = [x for x in cells if (x[0] - v[0], x[1] - v[1]) not in own]
++        return not vac or sum(1 for x in vac if x in changed) >= PURITY * len(vac)
++
++    def candidates(cells, colours, same_colour_only):
++        bb = _bbox(cells)
++        size = len(cells)
++        norm = _norm(cells)
++        cand = {(dr, dc) for dr in range(-WINDOW, WINDOW + 1) for dc in range(-WINDOW, WINDOW + 1)}
++        for n in after_objs:
++            nb = n["bbox"]
++            similar = 0.5 * size <= len(n["cells"]) <= 2 * size
++            colour_ok = (not same_colour_only) or (colours & n["colours"])
++            if (similar and colour_ok) or n["norm"] == norm:
++                cand.add((nb[0] - bb[0], nb[1] - bb[1]))
++                cand.add((nb[2] - bb[2], nb[3] - bb[3]))
++                cand.add(((nb[0] + nb[2] - bb[0] - bb[2]) // 2, (nb[1] + nb[3] - bb[1] - bb[3]) // 2))
++        votes = {}
++        vac = [x for x in cells if x in changed][:64]
++        for (r, c) in vac:
++            fil = filled_by_colour.get(a[r][c], [])
++            if len(fil) > 256:
++                step = len(fil) / 256.0
++                fil = [fil[int(i * step)] for i in range(256)]
++            for (fr, fc) in fil:
++                key = (fr - r, fc - c)
++                votes[key] = votes.get(key, 0) + 1
++        for key, _ in sorted(votes.items(), key=lambda kv: -kv[1])[:6]:
++            cand.add(key)
++        cand.discard((0, 0))
++        return cand
++
++    motions = []        # {"cells": prev cells, "v": shift, "visible": n matched, "trans": {a->b: n}, "kind": ...}
++    recolours = []      # in place: {"cells", "trans"}
++    used = set()        # prev cells claimed by a matched object / primitive
++    prior = []          # shifts accepted so far (larger shapes first)
++    claimed = set()     # after-frame cells already explained as the arrival of an accepted motion
++
++    def overlaps_claimed(cells, v):
++        """a shifted piece may not land mostly on cells another motion already filled (self-similar line pieces)"""
++        if not claimed:
++            return False
++        hit = sum(1 for r, c in cells if (r + v[0], c + v[1]) in claimed)
++        return hit > 0.2 * len(cells)
++
++    def claim(cells, v):
++        for r, c in cells:
++            t = (r + v[0], c + v[1])
++            if inb(*t):
++                claimed.add(t)
++
++    # ---- stage 1: colour-agnostic objects, whole-footprint translation ----
++    failed_objs = []
++    for cells in sorted(_objects(a, changed, bg, max_size), key=len, reverse=True):
++        n = len(cells)
++        if n <= SMALL:
++            continue
++        cset = set(cells)
++
++        def foot(v):
++            dr, dc = v
++            f = m = nn = 0
++            for r, c in cells:
++                rr, cc = r + dr, c + dc
++                if inb(rr, cc):
++                    nn += 1
++                    x = b[rr][cc]
++                    if x != bg_b:
++                        f += 1
++                        if x == a[r][c]:
++                            m += 1
++            return f, m, nn
++
++        f0, m0, _ = foot((0, 0))
++        valid = []
++        for v in candidates(cells, {a[r][c] for r, c in cells}, False):
++            f, m, nn = foot(v)
++            if nn * 2 < n or f <= f0:
++                continue
++            need = nn if n <= 4 else KEEP * nn
++            if f < need:
++                continue
++            if not arrival_ok(cells, v, lambda x, y: x != bg_b) or overlaps_claimed(cells, v) or not vacated_ok(cells, v):
++                continue
++            valid.append(((f, m, -(abs(v[0]) + abs(v[1]))), v, f))
++        best = _pick(valid, prior)
++        if best is not None:
++            v = best[1]
++            prior.append(v)
++            claim(cells, v)
++            trans = {}
++            for r, c in cells:
++                rr, cc = r + v[0], c + v[1]
++                if inb(rr, cc) and b[rr][cc] != bg_b and b[rr][cc] != a[r][c]:
++                    k = f"{_ch(a[r][c])}->{_ch(b[rr][cc])}"
++                    trans[k] = trans.get(k, 0) + 1
++            motions.append({"cells": cells, "v": v, "visible": best[2], "trans": trans, "dots": False})
++            used |= cset
++            continue
++        # identical footprint, colours changed in place (a turn, a highlight)
++        if f0 == n:
++            comp = None
++            for o in after_objs:
++                if cells[0] in o["cells"]:
++                    comp = o
++                    break
++            if comp is not None and set(comp["cells"]) == cset:
++                if n <= BIG_OBJECT:
++                    parts = [cells]
++                else:
++                    # a large merged object (a wall strip touching the avatar and the HUD bar): one entry per
++                    # cluster of changed cells, so each recolour is attributed to the piece it happened on
++                    ch_cells = {x for x in cells if x in changed}
++                    parts, seen_c = [], set()
++                    for x in sorted(ch_cells):
++                        if x not in seen_c:
++                            parts.append(_flood_set(x, ch_cells, seen_c))
++                for part in parts:
++                    trans = {}
++                    for r, c in part:
++                        if a[r][c] != b[r][c]:
++                            k = f"{_ch(a[r][c])}->{_ch(b[r][c])}"
++                            trans[k] = trans.get(k, 0) + 1
++                    recolours.append({"cells": part, "trans": trans})
++                used |= cset
++                continue
++        failed_objs.append(cells)
++
++    # ---- stage 1b: a moving part of a merged multi-colour object (wa30: the avatar steps and turns while it
++    # touches a box, so the colour-agnostic component is avatar + box and no whole-object shift fits). Same
++    # idea as stage 2b below, on the non-background footprint: pick the shift explaining most footprint
++    # changes, grow the moving part, require rigidity, and require that the rest of the object kept its
++    # footprint (in-place colour changes of the rest, e.g. a highlight, are reported as recolours). ----
++    def fp_changed(x):
++        return (a[x[0]][x[1]] != bg) != (b[x[0]][x[1]] != bg_b)
++
++    for cells in failed_objs:
++        if set(cells) & used:
++            continue
++        own_fp = [u for u in cells if fp_changed(u) and u not in claimed]
++        if len(own_fp) < 2:
++            continue
++        cands1b = []
++        for v in candidates(cells, {a[r][c] for r, c in cells}, False) | set(prior):
++            if v == (0, 0):
++                continue
++            ok_cells = set()
++            vac = arr = 0
++            for (r, c) in cells:
++                t = (r + v[0], c + v[1])
++                if not inb(*t) or b[t[0]][t[1]] == bg_b or t in claimed:
++                    continue
++                ok_cells.add((r, c))
++                vac += fp_changed((r, c))
++                arr += fp_changed(t)
++            if vac < 2 or arr < 2 or vac < 0.6 * len(own_fp):
++                continue
++            cands1b.append((vac + arr, v, ok_cells))
++        if not cands1b:
++            continue
++        top = max(e for e, _, _ in cands1b)
++        near = [x for x in cands1b if x[0] >= 0.9 * top]
++        _, v, ok_cells = max(near, key=lambda x: (x[1] in prior, -(abs(x[1][0]) + abs(x[1][1])), x[0]))
++        # seeds: cells the moving part LEFT (non-background before, background after); grow only through
++        # their colours, so a static piece of another colour touching the mover is not dragged along
++        seeds = [u for u in ok_cells if b[u[0]][u[1]] == bg_b]
++        if not seeds:
++            seeds = [u for u in ok_cells if fp_changed(u) or fp_changed((u[0] + v[0], u[1] + v[1]))]
++        seed_cols = {a[r][c] for r, c in seeds}
++        part = set(seeds)
++        stack = list(seeds)
++        while stack:
++            r, c = stack.pop()
++            for dr, dc in _N8:
++                t = (r + dr, c + dc)
++                if t in ok_cells and t not in part and a[t[0]][t[1]] in seed_cols:
++                    part.add(t)
++                    stack.append(t)
++        if len(part) < 6:
++            continue
++        moved_to = {(r + v[0], c + v[1]) for r, c in part}
++        vacated = part - moved_to
++        filled = moved_to - part
++        if vacated and sum(1 for x in vacated if fp_changed(x)) < PURITY_2B * len(vacated):
++            continue
++        if filled and sum(1 for x in filled if fp_changed(x)) < PURITY_2B * len(filled):
++            continue
++        rest = [x for x in cells if x not in part]
++        if rest and sum(1 for x in rest if fp_changed(x) and x not in claimed) > REST_CHANGED * len(rest):
++            continue
++        trans = {}
++        for r, c in part:
++            t = (r + v[0], c + v[1])
++            if b[t[0]][t[1]] != a[r][c]:
++                k = f"{_ch(a[r][c])}->{_ch(b[t[0]][t[1]])}"
++                trans[k] = trans.get(k, 0) + 1
++        prior.append(v)
++        claim(part, v)
++        vis = sum(1 for r, c in part if b[r + v[0]][c + v[1]] != bg_b)     # footprint still visible after the move
++        motions.append({"cells": sorted(part), "v": v, "visible": vis, "trans": trans, "dots": False})
++        used |= part
++        # the rest kept its footprint: its in-place colour changes are recolours of the static piece(s)
++        rest_ch = {x for x in rest if x in changed and x not in claimed and not fp_changed(x)}
++        seen_c = set()
++        for x in sorted(rest_ch):
++            if x in seen_c:
++                continue
++            piece = _flood_set(x, rest_ch, seen_c)
++            tr = {}
++            for r, c in piece:
++                k = f"{_ch(a[r][c])}->{_ch(b[r][c])}"
++                tr[k] = tr.get(k, 0) + 1
++            recolours.append({"cells": piece, "trans": tr})
++        used |= set(rest)
++
++    # ---- stage 2: same-colour primitives for everything not yet claimed ----
++    def score(cells, k, v):
++        dr, dc = v
++        m = nn = 0
++        for r, c in cells:
++            rr, cc = r + dr, c + dc
++            if inb(rr, cc):
++                nn += 1
++                if b[rr][cc] == k:
++                    m += 1
++        return m, nn
++
++    prims = sorted(_primitives(a, changed - used - claimed, bg, max_size, exclude=used),
++                   key=lambda p: -len(p["cells"]))
++    small = []
++    failed = []
++    def still_open(cells):
++        """a piece whose changed cells are all explained by a larger motion (covered / uncovered by it) is done"""
++        return any(u in changed and u not in claimed and u not in used for u in cells)
++
++    def prior_fit(p):
++        """the best already-accepted shift that fits the piece at PRIOR_KEEP, or None"""
++        k, cells = p["colour"], p["cells"]
++        n = len(cells)
++        m0, _ = score(cells, k, (0, 0))
++        best = None
++        for v in dict.fromkeys(prior):
++            m, nn = score(cells, k, v)
++            if nn * 2 < n or m <= m0 or m < (nn if n <= 4 else PRIOR_KEEP * nn):
++                continue
++            if not arrival_ok(cells, v, lambda x, y, k=k: x == k) or overlaps_claimed(cells, v) or not vacated_ok(cells, v):
++                continue
++            if best is None or m > best[1]:
++                best = (v, m)
++        return best
++
++    big = []
++    for p in prims:
++        if not still_open(p["cells"]):
++            continue
++        (small if len(p["cells"]) <= SMALL else big).append(p)
++    # pieces consistent with an accepted shift go first, so a self-similar piece cannot take their arrival cells
++    queue = list(big)
++    while queue:
++        placed = True
++        while placed:
++            placed = False
++            for p in list(queue):
++                if not still_open(p["cells"]):
++                    queue.remove(p)
++                    continue
++                pf = prior_fit(p)
++                if pf is not None:
++                    claim(p["cells"], pf[0])
++                    motions.append({"cells": p["cells"], "v": pf[0], "visible": pf[1], "trans": {}, "dots": False})
++                    used |= set(p["cells"])
++                    queue.remove(p)
++                    placed = True
++        if not queue:
++            break
++        p = queue.pop(0)
++        k, cells = p["colour"], p["cells"]
++        n = len(cells)
++        cand = candidates(cells, {k}, True)
++        m0, _ = score(cells, k, (0, 0))
++        valid = []
++        for v in cand | set(prior):
++            if v == (0, 0):
++                continue
++            m, nn = score(cells, k, v)
++            if nn * 2 < n or m <= m0:
++                continue
++            if m < (nn if n <= 4 else (PRIOR_KEEP if v in prior else KEEP) * nn):
++                continue
++            if not arrival_ok(cells, v, lambda x, y, k=k: x == k) or overlaps_claimed(cells, v) or not vacated_ok(cells, v):
++                continue
++            valid.append(((m, -(abs(v[0]) + abs(v[1]))), v, m))
++        best = _pick(valid, prior)
++        if best is not None:
++            prior.append(best[1])
++            claim(cells, best[1])
++            motions.append({"cells": cells, "v": best[1], "visible": best[2], "trans": {}, "dots": False})
++            used |= set(cells)
++            continue
++        # colour-agnostic: one new colour on the shifted (or same) cells
++        validA = []
++        for v in list(cand | set(prior)) + [(0, 0)]:
++            counts = {}
++            nn = 0
++            for r, c in cells:
++                rr, cc = r + v[0], c + v[1]
++                if inb(rr, cc):
++                    nn += 1
++                    counts[b[rr][cc]] = counts.get(b[rr][cc], 0) + 1
++            if not counts or nn * 2 < n:
++                continue
++            k2, m = max(counts.items(), key=lambda kv: kv[1])
++            if k2 == k or k2 == bg_b or n < 5 or m < KEEP * nn:
++                continue
++            if v != (0, 0) and (not arrival_ok(cells, v, lambda x, y, k2=k2: x == k2) or overlaps_claimed(cells, v)
++                                or not vacated_ok(cells, v)):
++                continue
++            if v == (0, 0) and not all((r, c) in changed for r, c in cells if b[r][c] == k2):
++                continue
++            validA.append(((m, -(abs(v[0]) + abs(v[1]))), v, m, k2))
++        bestA = _pick(validA, prior)
++        if bestA is not None:
++            trans = {f"{_ch(k)}->{_ch(bestA[3])}": bestA[2]}
++            if bestA[1] == (0, 0):
++                recolours.append({"cells": cells, "trans": trans})
++            else:
++                motions.append({"cells": cells, "v": bestA[1], "visible": bestA[2], "trans": trans, "dots": False})
++                claim(cells, bestA[1])
++            used |= set(cells)
++        else:
++            failed.append(p)
++
++    # ---- stage 2b: a moving part inside a larger same-colour structure (re86 L3: one red line crossing
++    # static red shapes forms ONE primitive with them, so no whole-primitive shift fits). Pick the shift under
++    # which the most of the primitive's changed cells are explained (vacated cell u with colour k at u+v, or a
++    # filled cell u+v), then grow the moving part as the 8-connected cells u with colour k at u+v that touch
++    # the explained ones. ----
++    for p in failed:
++        k, cells = p["colour"], p["cells"]
++        if set(cells) & used:
++            continue
++        own_changed = [u for u in cells if u in changed and u not in claimed]
++        if len(own_changed) < 2:
++            continue
++        cands2b = []
++        for v in candidates(cells, {k}, True) | set(prior):
++            if v == (0, 0):
++                continue
++            vac = arr = 0
++            ok_cells = set()
++            for (r, c) in cells:
++                t = (r + v[0], c + v[1])
++                if not inb(*t) or b[t[0]][t[1]] != k or t in claimed:
++                    continue
++                ok_cells.add((r, c))
++                if (r, c) in changed:
++                    vac += 1
++                if t in changed:
++                    arr += 1
++            if vac < 2 or arr < 2 or vac < 0.6 * len(own_changed):
++                continue
++            cands2b.append((vac + arr, v, ok_cells))
++        if not cands2b:
++            continue
++        # a uniform line explains the same cells under its true shift and under shifts along itself: among
++        # candidates within 90% of the best explanation, take an accepted shift first, then the shortest
++        top = max(e for e, _, _ in cands2b)
++        near = [x for x in cands2b if x[0] >= 0.9 * top]
++        _, v, ok_cells = max(near, key=lambda x: (x[1] in prior, -(abs(x[1][0]) + abs(x[1][1])), x[0]))
++        seeds = [u for u in ok_cells if u in changed or (u[0] + v[0], u[1] + v[1]) in changed]
++        part = set(seeds)
++        stack = list(seeds)
++        while stack:
++            r, c = stack.pop()
++            for dr, dc in _N8:
++                t = (r + dr, c + dc)
++                if t in ok_cells and t not in part:
++                    part.add(t)
++                    stack.append(t)
++        if len(part) < 6:
++            continue        # tiny parts of a structure match too many shifts by chance
++        # rigidity: a real move changed (almost) every cell it vacates and every cell it newly fills; a shift
++        # invented inside a large static region of one colour leaves most of those cells unchanged
++        moved_to = {(r + v[0], c + v[1]) for r, c in part}
++        vacated = part - moved_to
++        filled = moved_to - part
++        if _DEBUG is not None:
++            rest = [x for x in cells if x not in part]
++            _DEBUG.append((v, len(part), len(cells), sum(1 for x in vacated if x in changed) / max(1, len(vacated)),
++                           sum(1 for x in filled if x in changed) / max(1, len(filled)),
++                           sum(1 for x in rest if x in changed and x not in claimed) / max(1, len(rest))))
++        if vacated and sum(1 for x in vacated if x in changed) < PURITY_2B * len(vacated):
++            continue
++        if filled and sum(1 for x in filled if x in changed) < PURITY_2B * len(filled):
++            continue
++        rest = [x for x in cells if x not in part]
++        if rest and sum(1 for x in rest if x in changed and x not in claimed) > REST_CHANGED * len(rest):
++            continue        # the rest of the structure changed too: not a part moving over a static same-colour shape
++        prior.append(v)
++        claim(part, v)
++        motions.append({"cells": sorted(part), "v": v, "visible": len(part), "trans": {}, "dots": False,
++                        "part_of": len(cells)})
++        used |= part
++
++    # small primitives: shift of a touching matched motion, then a unique destination / a dot group
++    leftovers = []
++    for p in small:
++        k, cells = p["colour"], p["cells"]
++        if not still_open(cells):
++            continue
++        done = False
++        for mt in motions:
++            if not _touches(cells, set(mt["cells"])):
++                continue
++            m, nn = score(cells, k, mt["v"])
++            if nn == len(cells) and m == nn:
++                motions.append({"cells": cells, "v": mt["v"], "visible": m, "trans": {}, "dots": False})
++                used |= set(cells)
++                done = True
++                break
++        if not done:
++            leftovers.append(p)
++    by_colour = {}
++    for p in leftovers:
++        by_colour.setdefault(p["colour"], []).append(p)
++    for k, group in by_colour.items():
++        fil = filled_by_colour.get(k, [])
++        votes = {}
++        for p in group:
++            for (r, c) in p["cells"]:
++                if (r, c) not in changed:
++                    continue
++                for (fr, fc) in fil:
++                    key = (fr - r, fc - c)
++                    if key != (0, 0):
++                        votes[key] = votes.get(key, 0) + 1
++        if not votes:
++            continue
++        v, _ = max(votes.items(), key=lambda kv: (kv[1], -(abs(kv[0][0]) + abs(kv[0][1]))))
++        if len(group) == 1 and len(fil) != len(group[0]["cells"]):
++            continue        # a lone dot with several look-alike destinations: ambiguous, leave it as a change
++        hit = [p for p in group if score(p["cells"], k, v)[0] == len(p["cells"])
++               and arrival_ok(p["cells"], v, lambda x, y, k=k: x == k)]
++        if len(hit) >= max(1, (3 * len(group) + 3) // 4):
++            if len(hit) > 1:
++                cells = [x for p in hit for x in p["cells"]]
++                motions.append({"cells": cells, "v": v, "visible": len(cells), "trans": {}, "dots": len(hit)})
++            else:
++                motions.append({"cells": hit[0]["cells"], "v": v, "visible": len(hit[0]["cells"]),
++                                "trans": {}, "dots": False})
++            for p in hit:
++                used |= set(p["cells"])
++
++    # ---- stage 3: merge touching motions with the same shift ----
++    groups = []
++    for mt in motions:
++        target = None
++        for g in groups:
++            if g["v"] == mt["v"] and (mt["dots"] or g["dots"] or _near(mt["cells"], g["set"])):
++                if mt["dots"] or g["dots"]:
++                    continue        # dot groups stay their own entry
++                target = g
++                break
++        if target is None:
++            groups.append({"v": mt["v"], "cells": list(mt["cells"]), "set": set(mt["cells"]),
++                           "visible": mt["visible"], "trans": dict(mt["trans"]), "dots": mt["dots"],
++                           "part_of": mt.get("part_of", 0)})
++        else:
++            target["cells"].extend(mt["cells"])
++            target["set"] |= set(mt["cells"])
++            target["visible"] += mt["visible"]
++            target["part_of"] = max(target["part_of"], mt.get("part_of", 0))
++            for k2, n2 in mt["trans"].items():
++                target["trans"][k2] = target["trans"].get(k2, 0) + n2
++    merged = True
++    while merged:
++        merged = False
++        for i in range(len(groups)):
++            for j in range(i + 1, len(groups)):
++                gi, gj = groups[i], groups[j]
++                if gi["v"] == gj["v"] and not gi["dots"] and not gj["dots"] and _near(gj["cells"], gi["set"]):
++                    gi["cells"].extend(gj["cells"])
++                    gi["set"] |= gj["set"]
++                    gi["visible"] += gj["visible"]
++                    gi["part_of"] = max(gi["part_of"], gj["part_of"])
++                    for k2, n2 in gj["trans"].items():
++                        gi["trans"][k2] = gi["trans"].get(k2, 0) + n2
++                    groups.pop(j)
++                    merged = True
++                    break
++            if merged:
++                break
++
++    explained = set()
++    for g in groups:
++        dr, dc = g["v"]
++        for r, c in g["cells"]:
++            if (r, c) in changed:
++                explained.add((r, c))
++            t = (r + dr, c + dc)
++            if t in changed:
++                explained.add(t)
++        out["motions"].append({
++            "shift": [dr, dc], "cells": len(g["cells"]),
++            "colours": "".join(sorted({_ch(a[r][c]) for r, c in g["cells"]})),
++            "bbox": list(_bbox(g["cells"])), "visible_after": g["visible"],
++            "dots": g["dots"] or 0, "part_of": g["part_of"],
++            "recolour": dict(sorted(g["trans"].items(), key=lambda kv: -kv[1])),
++            "_src": g["cells"]})
++    # markers: two one-cell in-place recolours that swap a colour (x->y here, z->x there)
++    singles = [rc for rc in recolours if sum(rc["trans"].values()) == 1]
++    paired = set()
++    for i, r1 in enumerate(singles):
++        for j, r2 in enumerate(singles):
++            if i == j or i in paired or j in paired:
++                continue
++            (t1,) = r1["trans"]
++            (t2,) = r2["trans"]
++            if t1.split("->")[0] == t2.split("->")[1]:
++                c1 = [x for x in r1["cells"] if x in changed][0]
++                c2 = [x for x in r2["cells"] if x in changed][0]
++                out["markers"].append({"colour": t1.split("->")[0], "from": list(c1), "to": list(c2),
++                                       "from_bbox": list(_bbox(r1["cells"])), "to_bbox": list(_bbox(r2["cells"])),
++                                       "_src": r1["cells"], "_dst": r2["cells"]})
++                paired |= {i, j}
++                explained.add(c1)
++                explained.add(c2)
++    paired_ids = {id(singles[i]) for i in paired}
++    for rc in recolours:
++        for x in rc["cells"]:
++            if x in changed:
++                explained.add(x)
++        if id(rc) in paired_ids:
++            continue
++        out["recolours"].append({"cells": len(rc["cells"]),
++                                 "changed": sum(rc["trans"].values()),
++                                 "colours": "".join(sorted({_ch(a[r][c]) for r, c in rc["cells"]})),
++                                 "bbox": list(_bbox(rc["cells"])),
++                                 "recolour": dict(sorted(rc["trans"].items(), key=lambda kv: -kv[1])),
++                                 "_src": rc["cells"]})
++    out["motions"].sort(key=lambda e: -e["cells"])
++    out["recolours"].sort(key=lambda e: -e["cells"])
++
++    # ---- stage 4: residual regions ----
++    resid = changed - explained
++    seen = set()
++    regions = []
++    for start in sorted(resid):
++        if start in seen:
++            continue
++        stack = [start]
++        seen.add(start)
++        cells = []
++        while stack:
++            r, c = stack.pop()
++            cells.append((r, c))
++            for dr, dc in _N8:
++                t = (r + dr, c + dc)
++                if t in resid and t not in seen:
++                    seen.add(t)
++                    stack.append(t)
++        trans = {}
++        for r, c in cells:
++            key = f"{_ch(a[r][c])}->{_ch(b[r][c])}"
++            trans[key] = trans.get(key, 0) + 1
++        if all(a[r][c] == bg for r, c in cells):
++            kind = "appeared"
++        elif all(b[r][c] == bg_b for r, c in cells):
++            kind = "disappeared"
++        else:
++            kind = "changed"
++        regions.append({"kind": kind, "cells": len(cells), "bbox": list(_bbox(cells)),
++                        "transitions": dict(sorted(trans.items(), key=lambda kv: -kv[1])), "_src": cells})
++    regions.sort(key=lambda e: -e["cells"])
++    out["regions"] = regions
++    out["explained_cells"] = len(explained)
++    return out
++
++
++def public(res):
++    """the result without the private cell lists (for JSON)"""
++    def strip(e):
++        return {k: v for k, v in e.items() if not k.startswith("_")}
++    return {k: ([strip(e) for e in v] if isinstance(v, list) else v) for k, v in res.items()}
++
++
++def _where(bb):
++    r0, c0, r1, c1 = bb
++    rows = f"row {r0}" if r0 == r1 else f"rows {r0}-{r1}"
++    cols = f"col {c0}" if c0 == c1 else f"cols {c0}-{c1}"
++    return f"{rows} {cols}"
++
++
++def _shift(v):
++    return f"({v[0]:+d},{v[1]:+d})"
++
++
++def _trans_text(trans, limit=3):
++    items = list(trans.items())[:limit]
++    return " ".join(f"{k} x{n}" if n > 1 else k for k, n in items)
++
++
++def _lines(res, names=None):
++    """(text, cells) per entry; names: optional dict entry-key -> label (ids from the tracker)"""
++    names = names or {}
++    body = []
++    for i, e in enumerate(res["motions"]):
++        label = names.get(("m", i))
++        if label:
++            what = label
++        elif e["dots"]:
++            what = f"{e['dots']} {e['colours']} dots"
++        else:
++            what = f"shape {e['colours']} {e['cells']} cells"
++        extra = ""
++        if e["recolour"]:
++            extra += ", colours " + _trans_text(e["recolour"])
++        if e["visible_after"] < e["cells"]:
++            extra += f", {e['visible_after']} of {e['cells']} cells visible after"
++        if e.get("part_of"):
++            extra += f", part of a {e['part_of']}-cell same-colour structure"
++        body.append((f"- moved {_shift(e['shift'])}: {what} at {_where(e['bbox'])}{extra}", e["cells"]))
++    for i, e in enumerate(res.get("markers", [])):
++        lab = names.get(("k", i), "")
++        body.append((f"- marker {e['colour']} moved ({e['from'][0]},{e['from'][1]})->({e['to'][0]},{e['to'][1]}){lab}", 2))
++    for i, e in enumerate(res["recolours"]):
++        label = names.get(("r", i)) or f"{e['cells']} cells"
++        part = f"{e['changed']} of " if e["changed"] < e["cells"] else ""
++        body.append((f"- recoloured in place: {part}{label} at {_where(e['bbox'])} ({_trans_text(e['recolour'])})",
++                     e["changed"]))
++    for e in res["regions"]:
++        body.append((f"- {e['kind']}: {e['cells']} cells at {_where(e['bbox'])} ({_trans_text(e['transitions'])})",
++                     e["cells"]))
++    return body
++
++
++def _cap(body, max_lines):
++    if len(body) > max_lines:
++        rest = body[max_lines - 1:]
++        body = body[:max_lines - 1] + [(f"- +{len(rest)} smaller changes ({sum(n for _, n in rest)} cells)", 0)]
++    return [t for t, _ in body]
++
++
++def render(res, max_lines=8):
++    """Compact text for the observation. Empty string when nothing changed."""
++    if res.get("error"):
++        return f"Shape motion: {res['error']}."
++    if not res.get("changed_cells"):
++        return ""
++    head = f"Shape motion: {res['changed_cells']} cells changed, {res['explained_cells']} explained by motions/recolours."
++    return "\n".join([head] + _cap(_lines(res), max_lines))
++
++
++def along(v, d):
++    """shift v points in the arrow direction d (same sign on d's axis, zero on the other axis)"""
++    return (v[0] * d[0] > 0 and v[1] == 0) if d[0] else (v[1] * d[1] > 0 and v[0] == 0)
++
++
++class Tracker:
++    """Stable ids for objects through a level, carried along by shape_motion's motions; avatar guess."""
++
++    def __init__(self):
++        self.objects = {}       # id -> set of cells
++        self.next_id = 1
++        self.avatar_score = {}
++        self.history = []       # per directional action: avatar id moved in the key's direction?
++
++    def reset(self, frame):
++        g = _as_rows(frame)
++        H, W = len(g), len(g[0])
++        bg = _mode_colour(g)
++        self.objects = {}
++        self.next_id = 1
++        self.avatar_score = {}
++        cells_all = {(r, c) for r in range(H) for c in range(W)}
++        for cells in _objects(g, cells_all, bg, int(SURFACE_FRACTION * H * W)):
++            self.objects[self.next_id] = set(cells)
++            self.next_id += 1
++
++    def avatar(self):
++        if not self.avatar_score:
++            return None
++        oid, s = max(self.avatar_score.items(), key=lambda kv: kv[1])
++        return oid if s >= 1.5 and oid in self.objects else None
++
++    def step(self, action, prev, nxt):
++        a, b = _as_rows(prev), _as_rows(nxt)
++        res = shape_motion(a, b)
++        if res.get("error"):
++            self.reset(b)
++            return {"res": res, "ids": {}, "avatar": None, "avatar_state": None}
++        H, W = len(b), len(b[0])
++        bg_b = _mode_colour(b)
++        avatar_before = self.avatar()
++        names = {}
++        moved = {}          # id -> shift
++        recol = set()
++        for i, e in enumerate(res["motions"]):
++            src = set(e["_src"])
++            ids = [oid for oid, cs in self.objects.items() if len(cs & src) * 2 >= len(cs)]
++            # split: a tracked object only partly inside the moving shape keeps its static rest under a new id
++            # (or, if most of it stays, the moving part gets a new id): shapes merged at the level start get
++            # their own identity at their first move
++            for oid, cs in list(self.objects.items()):
++                inside = cs & src
++                if not inside or inside == cs:
++                    continue
++                rest = cs - src
++                if oid in ids:
++                    self.objects[oid] = inside
++                    if len(rest) >= 3:
++                        self.objects[self.next_id] = rest
++                        self.next_id += 1
++                else:
++                    self.objects[oid] = rest
++            covered = set().union(*(self.objects[oid] for oid in ids)) if ids else set()
++            if len(src - covered) >= 3:
++                self.objects[self.next_id] = src - covered
++                ids.append(self.next_id)
++                self.next_id += 1
++            for oid in ids:
++                moved[oid] = tuple(e["shift"])
++            if ids:
++                names[("m", i)] = " + ".join(f"#{oid}" for oid in sorted(ids)) + \
++                                  (" (together)" if len(ids) > 1 else "") + f" ({e['colours']}, {e['cells']} cells)"
++        for i, e in enumerate(res["recolours"]):
++            src = set(e["_src"])
++            ids = [oid for oid, cs in self.objects.items() if cs & src]
++            for oid in ids:
++                recol.add(oid)
++            if ids:
++                names[("r", i)] = " + ".join(f"#{oid}" for oid in sorted(ids)) + f" ({e['cells']} cells)"
++        for i, e in enumerate(res.get("markers", [])):
++            s_ids = [oid for oid, cs in self.objects.items() if cs & set(e["_src"])]
++            d_ids = [oid for oid, cs in self.objects.items() if cs & set(e["_dst"])]
++            for oid in s_ids + d_ids:
++                recol.add(oid)
++            if s_ids or d_ids:
++                names[("k", i)] = f" (from #{','.join(map(str, s_ids)) or '?'} to #{','.join(map(str, d_ids)) or '?'})"
++        # update cells
++        changed_ids = set()
++        resid_cells = set()
++        for e in res["regions"]:
++            resid_cells |= set(e["_src"])
++        for oid in list(self.objects):
++            cs = self.objects[oid]
++            if oid in moved:
++                dr, dc = moved[oid]
++                self.objects[oid] = {(r + dr, c + dc) for r, c in cs if 0 <= r + dr < H and 0 <= c + dc < W}
++                continue
++            if cs & resid_cells:
++                changed_ids.add(oid)
++                keep = {(r, c) for r, c in cs if b[r][c] != bg_b}
++                grow = {x for x in resid_cells if b[x[0]][x[1]] != bg_b and _touches([x], cs)}
++                if keep or grow:
++                    self.objects[oid] = keep | grow
++                else:
++                    del self.objects[oid]
++        # residual appeared regions not attached to a known object: new ids
++        known = set().union(*self.objects.values()) if self.objects else set()
++        for e in res["regions"]:
++            if e["kind"] != "appeared":
++                continue
++            cells = set(e["_src"])
++            if cells & known or _touches(list(cells), known):
++                continue
++            self.objects[self.next_id] = cells
++            known |= cells
++            self.next_id += 1
++        # avatar votes: objects moved by an arrow key in its own direction
++        d = DIRS.get(str(action).upper())
++        key_moved = []
++        if d is not None:
++            for oid in list(self.avatar_score):
++                self.avatar_score[oid] *= 0.85
++            for oid, v in moved.items():
++                ok = along(v, d)
++                if ok:
++                    key_moved.append(oid)
++                self.avatar_score[oid] = self.avatar_score.get(oid, 0.0) + (1.0 if ok else -0.5)
++        state = None
++        if avatar_before is not None and d is not None:
++            if avatar_before in moved:
++                state = "moved " + _shift(moved[avatar_before])
++            elif key_moved:
++                state = ("did not move; " + ", ".join(f"#{k}" for k in sorted(key_moved)) +
++                         " moved in the key's direction")
++            elif avatar_before in recol:
++                state = "turned/recoloured in place, no displacement"
++            elif avatar_before in changed_ids:
++                state = "changed shape in place, no displacement"
++            else:
++                state = "did not move"
++        return {"res": res, "names": names, "moved": moved, "recoloured": recol, "changed": changed_ids,
++                "avatar": avatar_before, "avatar_state": state, "key_moved": key_moved}
++
++
++def render_tracked(st, max_lines=8):
++    res = st["res"]
++    if res.get("error"):
++        return f"Shape motion: {res['error']}."
++    lines = []
++    if st.get("avatar_state"):
++        lines.append(f"Your avatar (#{st['avatar']}, the object your arrow keys move): {st['avatar_state']}.")
++    if not res.get("changed_cells"):
++        return "\n".join(lines)
++    lines.append(f"Shape motion: {res['changed_cells']} cells changed, {res['explained_cells']} explained by motions/recolours.")
++    return "\n".join(lines + _cap(_lines(res, st.get("names")), max_lines))

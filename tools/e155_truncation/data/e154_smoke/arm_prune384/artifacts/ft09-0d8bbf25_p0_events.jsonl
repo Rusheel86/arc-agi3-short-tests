@@ -1,0 +1,60 @@
+{"type": "initial", "action_num": 0, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 1, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "analysis", "action_num": 1, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 2, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 3, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 4, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 5, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "analysis", "action_num": 5, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 6, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "analysis", "action_num": 6, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 7, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 8, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 9, "level_completed": true, "state": "NOT_FINISHED"}
+{"type": "analysis", "action_num": 9, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 10, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "analysis", "action_num": 10, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 11, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 12, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 13, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 14, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 15, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 16, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 17, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 18, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 19, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "analysis", "action_num": 19, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 20, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "analysis", "action_num": 20, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 21, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "analysis", "action_num": 21, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 22, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "analysis", "action_num": 22, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 23, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 24, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 25, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "analysis", "action_num": 25, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 26, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 27, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 28, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 29, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 30, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 31, "level_completed": true, "state": "NOT_FINISHED"}
+{"type": "analysis", "action_num": 31, "state": "NOT_FINISHED"}
+{"type": "analysis", "action_num": 31, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 32, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 33, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 34, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 35, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 36, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 37, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 38, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 39, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 40, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 41, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 42, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 43, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 44, "level_completed": false, "state": "NOT_FINISHED"}
+{"type": "action", "action_num": 45, "level_completed": true, "state": "NOT_FINISHED"}
+{"type": "analysis", "action_num": 45, "state": "NOT_FINISHED"}
+{"type": "analysis", "action_num": 45, "state": "NOT_FINISHED"}

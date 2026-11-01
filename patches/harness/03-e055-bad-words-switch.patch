@@ -1,0 +1,38 @@
+# E055: bad_words switch (the self-check word ban)
+# What it does: tool_agent.py: an optional list of banned opening words for the model's replies. OFF in E098/E154 (E058 measured that the ban loses at length).
+# Applies to: the Duck harness source tree (ARC3-Inference/...), after Franzen's harness-changes.patch and the
+#   patches numbered before this one, in this order (the order of the notebook's settings cell).
+# Files: ARC3-Inference/inference/agent/tool_agent.py
+# Source: notebook/arc3-e154-keepalive.ipynb, the `%%writefile /kaggle/e055-changes.patch` cell (cell 7 of the original
+#   notebook, 8 after the licence header); the text below the header is that cell's body, byte for byte.
+# sha256 of the body: 30caacbe9a32fed0c2295d1ca7da22f4fd94c8c63339048450f1c1129d0afc6d
+# Licence: MIT-0 (see LICENSE). Apply with: python patches/apply_patches.py --harness <dir> (or git apply).
+
+diff --git a/ARC3-Inference/inference/agent/tool_agent.py b/ARC3-Inference/inference/agent/tool_agent.py
+--- a/ARC3-Inference/inference/agent/tool_agent.py
++++ b/ARC3-Inference/inference/agent/tool_agent.py
+@@ -887,6 +887,14 @@
+ 
+ 
+ _HISTORY_IMAGE_PLACEHOLDER = "[grid image omitted from history]"
++
++
++def _bad_words() -> list[str]:
++    """E055: words the sampler may not produce (vLLM `bad_words`; allowed with
++    speculative decoding, unlike logit_bias). Comma-separated, read at call time;
++    empty = today's behaviour."""
++    raw = os.environ.get("ARC3_BAD_WORDS", "").strip()
++    return [w.strip() for w in raw.split(",") if w.strip()]
+ 
+ 
+ def _history_image_keep() -> int | None:
+@@ -5256,6 +5264,9 @@
+             template_kwargs["enable_thinking"] = bool(enable_thinking)
+         if template_kwargs:
+             payload["chat_template_kwargs"] = template_kwargs
++        bad_words = _bad_words()  # E055
++        if bad_words:
++            payload["bad_words"] = bad_words
+         payload["messages"] = _strip_control_keys(
+             _apply_summary_visibility(
+                 payload.get("messages") or [],

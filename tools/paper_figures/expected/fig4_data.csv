@@ -1,0 +1,7 @@
+what,model_blocks,drafter_blocks,total_blocks,games_fit,label
+"MTP (E098, check)",84,0,84,19,computed (real allocator; MTP row = logged)
+DFlash2-3,86,97,183,9,computed (real allocator; MTP row = logged)
+DFlash2-7,79,97,176,9,computed (real allocator; MTP row = logged)
+pool blocks 512 / 384 experts,922,,1660,,computed from measured GiB
+decode tok/s 512 / 384 experts (18 busy),995.5,,987.0,,measured
+games in flight 512 / 384 experts,18,,24,,computed (E073)

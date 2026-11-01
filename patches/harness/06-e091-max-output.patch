@@ -1,0 +1,23 @@
+# E091: per-game output cap
+# What it does: The reply cap is read per game (competition arm 32,768 tokens; control fallback 12,288).
+# Applies to: the Duck harness source tree (ARC3-Inference/...), after Franzen's harness-changes.patch and the
+#   patches numbered before this one, in this order (the order of the notebook's settings cell).
+# Files: ARC3-Inference/inference/agent/tool_agent.py
+# Source: notebook/arc3-e154-keepalive.ipynb, the `%%writefile /kaggle/e091-max-output.patch` cell (cell 10 of the original
+#   notebook, 11 after the licence header); the text below the header is that cell's body, byte for byte.
+# sha256 of the body: 9043aa6a025de4a6b0a52ab24732e48d83d7497b50fb8a56c19d3ad5fed32f7f
+# Licence: MIT-0 (see LICENSE). Apply with: python patches/apply_patches.py --harness <dir> (or git apply).
+
+diff --git a/ARC3-Inference/inference/agent/tool_agent.py b/ARC3-Inference/inference/agent/tool_agent.py
+--- a/ARC3-Inference/inference/agent/tool_agent.py
++++ b/ARC3-Inference/inference/agent/tool_agent.py
+@@ -3523,7 +3523,8 @@ class ToolAgent:
+             None if _LOCAL_ANALYZER_YIELD_TOKENS <= 0 else int(_LOCAL_ANALYZER_YIELD_TOKENS)
+         )
+         self._turn_generated_tokens = 0
+-        configured_max_output = _LOCAL_ANALYZER_MAX_OUTPUT
++        # E091: read when the agent starts, so arms in one process can differ
++        configured_max_output = _get_env_int("LOCAL_ANALYZER_MAX_OUTPUT", _LOCAL_ANALYZER_MAX_OUTPUT)
+         self._max_output_tokens = None if configured_max_output <= 0 else max(1, configured_max_output)
+         self._reply_reserve_tokens = self._max_output_tokens or 512
+         self._tool_output_tokens = max(64, _LOCAL_ANALYZER_TOOL_OUTPUT_TOKENS)

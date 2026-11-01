@@ -1,0 +1,24 @@
+# E040: context window read per game
+# What it does: tool_agent.py reads the context budget per game (ARC3 settings per arm) instead of one process-wide value.
+# Applies to: the Duck harness source tree (ARC3-Inference/...), after Franzen's harness-changes.patch and the
+#   patches numbered before this one, in this order (the order of the notebook's settings cell).
+# Files: ARC3-Inference/inference/agent/tool_agent.py
+# Source: notebook/arc3-e154-keepalive.ipynb, the `%%writefile /kaggle/e040-changes.patch` cell (cell 5 of the original
+#   notebook, 6 after the licence header); the text below the header is that cell's body, byte for byte.
+# sha256 of the body: a71a60925f2110d1378317146d5f25e10c41e5eba22f6b35c7cea9aae95c89b1
+# Licence: MIT-0 (see LICENSE). Apply with: python patches/apply_patches.py --harness <dir> (or git apply).
+
+diff --git a/ARC3-Inference/inference/agent/tool_agent.py b/ARC3-Inference/inference/agent/tool_agent.py
+--- a/ARC3-Inference/inference/agent/tool_agent.py
++++ b/ARC3-Inference/inference/agent/tool_agent.py
+@@ -3505,7 +3505,9 @@
+         self._request_safety_margin_tokens = _REQUEST_SAFETY_MARGIN_TOKENS
+         self._context_budget_tokens = max(
+             1024,
+-            _LOCAL_ANALYZER_CONTEXT_WINDOW - self._reply_reserve_tokens - self._request_safety_margin_tokens,
++            # E040: read when the agent starts, so arms in one process can differ
++            _get_env_int("LOCAL_ANALYZER_CONTEXT_WINDOW", _LOCAL_ANALYZER_CONTEXT_WINDOW)
++            - self._reply_reserve_tokens - self._request_safety_margin_tokens,
+         )
+         self._turns_without_wm_update = 0
+         self._pending_wm_rebuild_reason = ""

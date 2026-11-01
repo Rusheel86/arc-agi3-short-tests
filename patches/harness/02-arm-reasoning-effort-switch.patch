@@ -1,0 +1,38 @@
+# Arm switch: reasoning effort per arm
+# What it does: tool_agent.py: an environment switch for the reasoning effort per arm. Kept for parity with earlier versions; unused in E098/E154.
+# Applies to: the Duck harness source tree (ARC3-Inference/...), after Franzen's harness-changes.patch and the
+#   patches numbered before this one, in this order (the order of the notebook's settings cell).
+# Files: ARC3-Inference/inference/agent/tool_agent.py
+# Source: notebook/arc3-e154-keepalive.ipynb, the `%%writefile /kaggle/arm-changes.patch` cell (cell 6 of the original
+#   notebook, 7 after the licence header); the text below the header is that cell's body, byte for byte.
+# sha256 of the body: 08984f4b6117b71f4c77b718a893d6280a460fdedec31177fe3080f024451b3c
+# Licence: MIT-0 (see LICENSE). Apply with: python patches/apply_patches.py --harness <dir> (or git apply).
+
+diff --git a/ARC3-Inference/inference/agent/tool_agent.py b/ARC3-Inference/inference/agent/tool_agent.py
+--- a/ARC3-Inference/inference/agent/tool_agent.py
++++ b/ARC3-Inference/inference/agent/tool_agent.py
+@@ -903,6 +903,15 @@
+         return max(0, int(raw))
+     except ValueError:
+         return None
++
++
++def _reasoning_effort_default() -> str:
++    """E029: reasoning_effort sent on every request while the truncation ladder
++    is idle (e.g. "xhigh", Lord Han Solo's setting). Constant for a whole run,
++    so the system message - where the chat template states the effort - and
++    the cached prefix stay byte-identical. Empty (default) = omit the key,
++    today's behaviour."""
++    return os.environ.get("ARC3_REASONING_EFFORT_DEFAULT", "").strip()
+ 
+ 
+ def _resume_prompt_images_enabled() -> bool:
+@@ -5213,6 +5222,8 @@
+         rung = getattr(self, "_reasoning_effort_rung", -1)
+         if ladder and 0 <= rung < len(ladder):
+             kwargs["reasoning_effort"] = ladder[rung]
++        elif _reasoning_effort_default():
++            kwargs["reasoning_effort"] = _reasoning_effort_default()
+         return kwargs
+ 
+     def _chat_completion(

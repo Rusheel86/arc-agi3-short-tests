@@ -1,0 +1,2 @@
+# the throughput line printed by the E081 run notebook (60-min screen, 24 games), verbatim
+generated 1112.2 tok/s over 57.5 min (minute 3 to the end)

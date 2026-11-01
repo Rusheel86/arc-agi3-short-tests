@@ -1,0 +1,73 @@
+# E154: keep-alive against slow model loads
+# What it does: solver.py: while ARC3_KEEPALIVE_HEALTH_URL does not answer 200, the warm-up game repeats its RESET every ARC3_KEEPALIVE_MIN (7) minutes, then plays as before. No URL, 0 or a bad value = E098 behaviour (no extra action).
+# Applies to: the Duck harness source tree (ARC3-Inference/...), after Franzen's harness-changes.patch and the
+#   patches numbered before this one, in this order (the order of the notebook's settings cell).
+# Files: ARC3-Inference/inference/framework/solver.py
+# Source: notebook/arc3-e154-keepalive.ipynb, the `%%writefile /kaggle/e154-keepalive.patch` cell (cell 12 of the original
+#   notebook, 13 after the licence header); the text below the header is that cell's body, byte for byte.
+# sha256 of the body: 3ebf20c13dec97b7bf36f30a0dc40ecb1ebb997b338f6edef5bcd712b0e59e66
+# Licence: MIT-0 (see LICENSE). Apply with: python patches/apply_patches.py --harness <dir> (or git apply).
+
+diff --git a/ARC3-Inference/inference/framework/solver.py b/ARC3-Inference/inference/framework/solver.py
+--- a/ARC3-Inference/inference/framework/solver.py
++++ b/ARC3-Inference/inference/framework/solver.py
+@@ -103,6 +103,51 @@
+ WARMUP_ACTION_GAMES = _env_number("ARC3_WARMUP_ACTION_GAMES", 0, int)
+ 
+ 
++# E154 (ledger E154): keep-alive against slow model loads. Kaggle's gateway is reported to close a scorecard that sees
++# no action for 15 minutes, and the warm-up RESET is ONE action at the release, so a server still loading 15 minutes
++# later scored 0. While ARC3_KEEPALIVE_HEALTH_URL does not answer 200, the warm-up game repeats that RESET every
++# ARC3_KEEPALIVE_MIN minutes (one action each, on level 1, before the model has seen the game), then plays as before.
++# No URL, 0 or a bad value = no check and no extra action (E098).
++def _e154_server_healthy(url: str) -> bool:
++    import urllib.request
++
++    try:
++        with urllib.request.urlopen(url, timeout=5) as response:
++            return response.status == 200
++    except Exception:
++        return False
++
++
++def _e154_keepalive(session: Any) -> int:
++    period_s = _env_number("ARC3_KEEPALIVE_MIN", 0.0) * 60.0
++    url = os.environ.get("ARC3_KEEPALIVE_HEALTH_URL", "").strip()
++    if not url or not 0.0 < period_s < float("inf"):
++        return 0
++    game_id = getattr(session.game.game_run, "game_id", "?")
++    started = time.monotonic()
++    due, sent = started + period_s, 0
++    log.warning("%s: E154 keep-alive armed: one RESET every %.2f min until %s answers", game_id, period_s / 60, url)
++    while not session.should_stop():
++        if _e154_server_healthy(url):
++            log.warning("%s: E154 keep-alive done: server healthy %.2f min after the warm-up RESET; %d keep-alive "
++                        "RESET(s), %d actions", game_id, (time.monotonic() - started) / 60, sent, session.action_count)
++            return sent
++        if time.monotonic() >= due:
++            try:
++                session._execute_auto_reset()
++            except Exception as exc:  # a gateway blip must not end the game: try again within a minute
++                due = time.monotonic() + min(period_s, 60.0)
++                log.warning("%s: E154 keep-alive RESET failed (%s: %s)", game_id, type(exc).__name__, exc)
++            else:
++                sent += 1
++                due = time.monotonic() + period_s
++                log.warning("%s: E154 keep-alive RESET %d at %.2f min after the warm-up RESET (server not healthy), "
++                            "%d actions", game_id, sent, (time.monotonic() - started) / 60, session.action_count)
++        time.sleep(min(10.0, period_s / 6))
++    log.warning("%s: E154 keep-alive stopped with the game after %d keep-alive RESET(s)", game_id, sent)
++    return sent
++
++
+ MAX_CONSECUTIVE_ANALYZER_FAILURES = _env_number("ARC3_MAX_ANALYZER_FAILURES", 10, int)
+ DEFAULT_CANCEL_DRAIN_TIMEOUT_SECONDS = 120.0
+ 
+@@ -650,6 +695,7 @@
+                 run.game_id,
+             )
+             self._execute_auto_reset()
++            _e154_keepalive(self)  # E154: one RESET every ARC3_KEEPALIVE_MIN min until the server is up
+         try:
+             retry_analysis_step: int | None = None
+             consecutive_failures = 0

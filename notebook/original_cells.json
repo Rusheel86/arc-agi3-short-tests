@@ -1,0 +1,242 @@
+{
+ "what": "sha256 of every cell source of the E154 notebook as pushed for kernel version 189 (script version id 362115816), before the licence header cell was added",
+ "original_file_sha256": "6cf982cdc56207671303e8fff71708aeda5a887d972d00b23c2fb1f40e153044",
+ "original_file_bytes": 989125,
+ "n_cells": 39,
+ "cells": [
+  {
+   "index": 0,
+   "type": "markdown",
+   "sha256": "306b4c02959f3436ea9d8ca2d8ccb30d68145608fe463fe78886fc267dfb336c",
+   "first_line": "# E098: depth + K8V4 + the timeout fix: 19 games at once with E091's 157k window, a 4-bit-value KV c"
+  },
+  {
+   "index": 1,
+   "type": "code",
+   "sha256": "fbe6dc3201f45ee852a691197c5855f3df0e6a7b8a45e31ef50a98f0f492b77d",
+   "first_line": "# ============ E146 v2 stub-commit mode, FAIL-SAFE (ledger E146 Amendment v2; inserted by analysis/b"
+  },
+  {
+   "index": 2,
+   "type": "markdown",
+   "sha256": "a2497758d74a025e44f6dc9c3dbc1513de8f5889e31e08d70499f38710fb3c8e",
+   "first_line": "# About this notebook"
+  },
+  {
+   "index": 3,
+   "type": "markdown",
+   "sha256": "169be8c9c24dcccc2c6250a89fa76f08a3d643b04a5af496373679a39c341160",
+   "first_line": "## 0. Harness patch"
+  },
+  {
+   "index": 4,
+   "type": "code",
+   "sha256": "6fdcd1ae7445c0cfc26eec1047363aa0c196c867d289a35b6f64403b5a43dce2",
+   "first_line": "%%writefile /kaggle/harness-changes.patch"
+  },
+  {
+   "index": 5,
+   "type": "code",
+   "sha256": "30116469bc87db6089125cbda6aab24d3cc921d2caa5ccfdeeedc7c8abc0a9ea",
+   "first_line": "%%writefile /kaggle/e040-changes.patch"
+  },
+  {
+   "index": 6,
+   "type": "code",
+   "sha256": "63176a7d253b4a2819aec55df13ba53ee6ce26332c396364056f4dbe003f1f55",
+   "first_line": "%%writefile /kaggle/arm-changes.patch"
+  },
+  {
+   "index": 7,
+   "type": "code",
+   "sha256": "ab5afc41b66174968518fc80bf5146307985b681a9f4684c855f2ba0b48f7b85",
+   "first_line": "%%writefile /kaggle/e055-changes.patch"
+  },
+  {
+   "index": 8,
+   "type": "code",
+   "sha256": "830a923493fcdadc921cbf1f446b1fa7b5811a403ab5444c925bff214b18e01e",
+   "first_line": "%%writefile /kaggle/e058-changes.patch"
+  },
+  {
+   "index": 9,
+   "type": "code",
+   "sha256": "a4d26ecd9da33479e875f626a1ef97715cf3ef1712f1911850cda73cdee5e8e8",
+   "first_line": "%%writefile /kaggle/e077-state-handoff.patch"
+  },
+  {
+   "index": 10,
+   "type": "code",
+   "sha256": "9aaaa4b6dfe3b0e49bdee0f299d19f08f6a4eeab1bbb5ff06df3d4f5be87f5bf",
+   "first_line": "%%writefile /kaggle/e091-max-output.patch"
+  },
+  {
+   "index": 11,
+   "type": "code",
+   "sha256": "64d1f223ecc4346f89aec7e7e77897c5979dcbce8e3cd9986b983d72dfa723ae",
+   "first_line": "%%writefile /kaggle/e097-harness-v3.patch"
+  },
+  {
+   "index": 12,
+   "type": "code",
+   "sha256": "3a6577d1b2583c75491e78150c16f722f2d03f93542db2f289e8d9af8f7b944f",
+   "first_line": "%%writefile /kaggle/e154-keepalive.patch"
+  },
+  {
+   "index": 13,
+   "type": "markdown",
+   "sha256": "fbfb0ea44fbfcd82ed9096b81a8e2fef4307951c5f1768d02d6a7d438a9519bb",
+   "first_line": "## 1. Environment and submission mode"
+  },
+  {
+   "index": 14,
+   "type": "code",
+   "sha256": "79abd63096bd9e4ea724a64f62d60fa39a9c94476102246dc8c60baad5019bc0",
+   "first_line": "# ======================= E098: depth + K8V4 + the timeout fix (ledger E098; arm D of the E086 dose "
+  },
+  {
+   "index": 15,
+   "type": "code",
+   "sha256": "988c5c93deca9ca20e583daa2e8288fd325e3bfe08a6abfd1466c55a507333bb",
+   "first_line": "# ======================= E154 (ledger E154): E098 made robust to slow model loads ================="
+  },
+  {
+   "index": 16,
+   "type": "code",
+   "sha256": "b4372716e4500559d5af81403bb67c0082d4fcb5083fbaa1b7f7064b6fb44e3b",
+   "first_line": "# Preflight (ledger E061): every input attached and intact, free disk and the GPU, before anything l"
+  },
+  {
+   "index": 17,
+   "type": "code",
+   "sha256": "ead694c79c69b9b25a79bee7bad777507f57a3c440b47c1c076614836043e5f5",
+   "first_line": "# E073 prepare (ledger E073): the plan of the pruned server, keep E073_KEEP (384) of 512 routed expe"
+  },
+  {
+   "index": 18,
+   "type": "code",
+   "sha256": "1ac49387cc8e76fa8959793545d9235d5debdf1144489d026f68d46768233f25",
+   "first_line": "# E081 KT2-lite prepare (ledger E080/E081; commit screen only). The KT2-lite stage runs after the sc"
+  },
+  {
+   "index": 19,
+   "type": "markdown",
+   "sha256": "1dca3bc6097eb7a3635006f77ab8540fd09c41884eaf452fb1ef6ef49166aa6f",
+   "first_line": "## 2. Precaching"
+  },
+  {
+   "index": 20,
+   "type": "code",
+   "sha256": "e9b9df59be4274eb30d18ba8f2be0b43270a2aab3f9502ace43c99805208d7ff",
+   "first_line": "# E019: the vLLM launcher prefetches its model shards itself; nothing to precache here."
+  },
+  {
+   "index": 21,
+   "type": "markdown",
+   "sha256": "19ce8a29df261ac700964b81a477d5aba97956efd908f369ff337c5e52ba3545",
+   "first_line": "## 3. Install the ARC runtime"
+  },
+  {
+   "index": 22,
+   "type": "code",
+   "sha256": "0acc65bba3dd5435f5e25a73cb378b3ff269364f0f7a5a99226fc4a41060ae44",
+   "first_line": "# Install the ARC runtime from the bundled competition wheels."
+  },
+  {
+   "index": 23,
+   "type": "markdown",
+   "sha256": "8c16a184c0f83c761216b244646523dd8d1a376779d2a5da4d65c06d3e310948",
+   "first_line": "## 4. Import the bundled source"
+  },
+  {
+   "index": 24,
+   "type": "code",
+   "sha256": "e90a3a7aafca6e8f3a041b70a4dbbec721adb62b58a19e1f89ac4f019d0ae976",
+   "first_line": "# Each bundled repo exposes its importable tree at <repo>/src or <repo>."
+  },
+  {
+   "index": 25,
+   "type": "markdown",
+   "sha256": "d0ace6204e232ecb13ef892cbb3c7f121d826c4e28a41f0e7f16b281a686dd07",
+   "first_line": "## 5. Start serving"
+  },
+  {
+   "index": 26,
+   "type": "code",
+   "sha256": "bc69d4a6ff1bd058ff24110668c6b81e29d7db205914b35a0eed2ffe11b9127b",
+   "first_line": "# E019: Lord Han Solo's vLLM runtime + mixed NVFP4/FP8 checkpoint instead of SGLang + W4A16."
+  },
+  {
+   "index": 27,
+   "type": "markdown",
+   "sha256": "225a9c44015867332512f5f96fc1436c4c094d23fcf1ed29e76778c4e2b5da89",
+   "first_line": "## 6. Load the benchmark"
+  },
+  {
+   "index": 28,
+   "type": "code",
+   "sha256": "63d378a0f4ca15b2b46e69e8198b731b703e4ca91b3a889951127846b42cdd5d",
+   "first_line": "# Restore the deployment target and record the real submission state on it."
+  },
+  {
+   "index": 29,
+   "type": "markdown",
+   "sha256": "a18104ebab0211f1958cc1c5bd451b403ead004d03d6fe979728003bf15b506b",
+   "first_line": "## 7. Customization hook"
+  },
+  {
+   "index": 30,
+   "type": "code",
+   "sha256": "e7dbf2494cfd31e6e818a401fdc837afe95f30addcab29440e457d7f6b209c85",
+   "first_line": "# Make one-off changes to `bm`, `bm.games`, or `bm.solver` here before the run starts."
+  },
+  {
+   "index": 31,
+   "type": "markdown",
+   "sha256": "371ff5381197ce6d842189a0b3abebcd2cb9b2b7dedd8e587a634f95ebace0de",
+   "first_line": "## 8. Run the system monitor"
+  },
+  {
+   "index": 32,
+   "type": "code",
+   "sha256": "ba1a098185cfdde69293193cebdf108567a446667086c4cb771660a1696459ac",
+   "first_line": "# --- system census, one line every 10 minutes -------------------------------"
+  },
+  {
+   "index": 33,
+   "type": "markdown",
+   "sha256": "7aab5e8e6a9df664b4a50eac8c3131544e06ddcda06d05355c89d7f92c3e29e1",
+   "first_line": "## 8b. E081: the screen's sampler"
+  },
+  {
+   "index": 34,
+   "type": "code",
+   "sha256": "dd60270b22385a22b59518cd3641ecd925c325caddeb05837e118e8700b5177e",
+   "first_line": "# E081 sampler (ledger E081; commit runs only: the run cell calls e081_stage_hook around each stage "
+  },
+  {
+   "index": 35,
+   "type": "markdown",
+   "sha256": "172484ce3fc09a0f036895497cac61fe0f119caecc2ee2b250a062dd538d2b88",
+   "first_line": "## 9. Run the benchmark"
+  },
+  {
+   "index": 36,
+   "type": "code",
+   "sha256": "c207388aa6e5ade041a1bb19985ed6525f94be289d9a0f810569de5807bf7806",
+   "first_line": "print('Starting benchmark...')"
+  },
+  {
+   "index": 37,
+   "type": "markdown",
+   "sha256": "fb349f319b011b0e7d68eb3a82f004a314b59180e1e6d56a2c3b1e34b6faa1a6",
+   "first_line": "## 10. E098 smoke check"
+  },
+  {
+   "index": 38,
+   "type": "code",
+   "sha256": "7ff0c0ac1f629579de8cafdd345a4a7beca40ea6aab83273dbd9566d482a7955",
+   "first_line": "# E098 smoke check (ledger E098; commit smoke only). Reads: the server (/v1/models, /metrics), its l"
+  }
+ ]
+}

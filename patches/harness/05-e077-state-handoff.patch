@@ -1,0 +1,351 @@
+# E077: constant-cost game-state hand-off
+# What it does: The harness rewrote the whole history every move (2 s to 26 s of CPU per step); with ARC3_STATE_HANDOFF=incremental it hands over only the change. The model's input changes only through fewer timeouts (ledger E077-A, E081).
+# Applies to: the Duck harness source tree (ARC3-Inference/...), after Franzen's harness-changes.patch and the
+#   patches numbered before this one, in this order (the order of the notebook's settings cell).
+# Files: ARC3-Inference/inference/agent/python_tool_sandbox.py, ARC3-Inference/inference/agent/runtime_state.py, ARC3-Inference/inference/agent/tool_agent.py, ARC3-Inference/inference/framework/solver.py
+# Source: notebook/arc3-e154-keepalive.ipynb, the `%%writefile /kaggle/e077-state-handoff.patch` cell (cell 9 of the original
+#   notebook, 10 after the licence header); the text below the header is that cell's body, byte for byte.
+# sha256 of the body: ecf673dbc46687fe9fa67104619c695d31ffc00c468dde1bdfb01cb25f617018
+# Licence: MIT-0 (see LICENSE). Apply with: python patches/apply_patches.py --harness <dir> (or git apply).
+
+diff --git a/ARC3-Inference/inference/agent/python_tool_sandbox.py b/ARC3-Inference/inference/agent/python_tool_sandbox.py
+index 58a94b3..397e7df 100644
+--- a/ARC3-Inference/inference/agent/python_tool_sandbox.py
++++ b/ARC3-Inference/inference/agent/python_tool_sandbox.py
+@@ -13,6 +13,7 @@ import tempfile
+ import threading
+ import textwrap
+ import time
++import uuid
+ from typing import Any, Callable
+ 
+ from inference.utils import frame_diff as _frame_diff_module
+@@ -773,8 +774,35 @@ def _sandbox_env() -> dict[str, str]:
+     }
+ 
+ 
++class PreEncodedJSON:
++    """E077: a JSON text placed verbatim at message["state"]["history"].
++
++    The incremental state hand-off encodes each history entry once and joins the
++    cached texts; the line sent is byte-identical to json.dumps of the decoded
++    list, so the sandbox child receives exactly what it received before.
++    """
++
++    __slots__ = ("text",)
++
++    def __init__(self, text: str) -> None:
++        self.text = text
++
++
++def _encode_message(payload: dict[str, Any]) -> str:
++    state = payload.get("state")
++    history = state.get("history") if isinstance(state, dict) else None
++    if not isinstance(history, PreEncodedJSON):
++        return json.dumps(payload, ensure_ascii=False)
++    sentinel = f"__e077_history_{uuid.uuid4().hex}__"
++    text = json.dumps({**payload, "state": {**state, "history": sentinel}}, ensure_ascii=False)
++    quoted = json.dumps(sentinel)
++    if text.count(quoted) != 1:
++        raise RuntimeError("E077: history placeholder is not unique in the sandbox message")
++    return text.replace(quoted, history.text, 1)
++
++
+ def _send_json_line(handle: Any, payload: dict[str, Any]) -> None:
+-    handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
++    handle.write(_encode_message(payload) + "\n")
+     handle.flush()
+ 
+ 
+diff --git a/ARC3-Inference/inference/agent/runtime_state.py b/ARC3-Inference/inference/agent/runtime_state.py
+index 5a00139..74eb723 100644
+--- a/ARC3-Inference/inference/agent/runtime_state.py
++++ b/ARC3-Inference/inference/agent/runtime_state.py
+@@ -2,9 +2,12 @@
+ from __future__ import annotations
+ 
+ import json
++import operator
++import os
++import threading
+ from dataclasses import dataclass, field
+ from pathlib import Path
+-from typing import Any
++from typing import Any, Callable
+ 
+ from inference.utils.grid_utils import format_grid_ascii
+ 
+@@ -115,6 +118,8 @@ def load_runtime_state(path: Path) -> tuple[Frame | None, list[HistoryEntry]]:
+         return None, []
+     payload = json.loads(path.read_text(encoding="utf-8"))
+     current_frame = frame_from_payload(payload.get("current_frame"))
++    if _INCREMENTAL_KEY in payload:
++        return current_frame, _load_incremental_history(path, payload)
+     history_entries = [
+         entry
+         for raw_entry in payload.get("history", [])
+@@ -131,6 +136,9 @@ def write_runtime_state(
+     history: list[HistoryEntry],
+ ) -> None:
+     path.parent.mkdir(parents=True, exist_ok=True)
++    if state_handoff_incremental():
++        _write_incremental(path, current_frame=current_frame, history=history)
++        return
+     payload = {
+         "current_frame": frame_to_payload(current_frame),
+         "history": [history_entry_to_payload(entry) for entry in history],
+@@ -138,3 +146,169 @@ def write_runtime_state(
+     tmp_path = path.with_suffix(f"{path.suffix}.tmp")
+     tmp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+     tmp_path.replace(path)
++
++
++# ---------------------------------------------------------------------------
++# E077: constant-cost state hand-off (ARC3_STATE_HANDOFF=incremental; default off).
++#
++# The default path above rewrites the WHOLE history (every 64x64 frame as
++# indented JSON) after every action, and every load re-parses all of it, so
++# each move and each python call costs time proportional to the game's length.
++# With the flag on the history is append-only: each new entry is serialised
++# once, appended to a sidecar file, and kept in an in-process store in exactly
++# the form a load of the old file would rebuild (the same JSON round trip).
++# Loads build fresh HistoryEntry objects (fresh result dicts; frames are
++# immutable and shared) without parsing anything old, and per-entry encodings
++# (the sandbox view's JSON text) are computed once per entry. A load returns
++# values identical to the default path's; a history that changed other than by
++# appending is rewritten in full; a store that is out of sync (another process)
++# falls back to reading the sidecar from disk.
++# ---------------------------------------------------------------------------
++STATE_HANDOFF_ENV = "ARC3_STATE_HANDOFF"
++_INCREMENTAL_KEY = "history_sidecar"
++_SIDECAR_SUFFIX = ".history.jsonl"
++
++
++def state_handoff_incremental() -> bool:
++    return os.environ.get(STATE_HANDOFF_ENV, "").strip().lower() == "incremental"
++
++
++class _HistoryStore:
++    def __init__(self, sidecar: Path) -> None:
++        self.sidecar = sidecar
++        # the writer's entries, kept for the append-only identity check
++        self.source: list[HistoryEntry] = []
++        # per written entry, what a load of the old file rebuilds:
++        # (action, frame, result as JSON text), or None if a load would skip it
++        self.loaded: list[tuple[str, Frame, str] | None] = []
++        self.generation = 0
++        self.memo: dict[str, list[str | None]] = {}
++
++
++_STORES: dict[str, _HistoryStore] = {}
++_STORES_LOCK = threading.Lock()
++
++
++def _store_key(path: Path) -> str:
++    return os.path.abspath(str(path))
++
++
++def _round_trip(entry: HistoryEntry) -> tuple[str, tuple[str, Frame, str] | None]:
++    line = json.dumps(history_entry_to_payload(entry))
++    loaded = history_entry_from_payload(json.loads(line))
++    if loaded is None:
++        return line, None
++    # keep the writer's frame object when the round trip left it unchanged (frames are immutable)
++    frame = entry.frame if loaded.frame == entry.frame else loaded.frame
++    return line, (loaded.action, frame, json.dumps(loaded.result))
++
++
++def _write_incremental(path: Path, *, current_frame: Frame | None, history: list[HistoryEntry]) -> None:
++    key = _store_key(path)
++    with _STORES_LOCK:
++        store = _STORES.get(key)
++        if store is None:
++            store = _STORES[key] = _HistoryStore(path.with_name(path.name + _SIDECAR_SUFFIX))
++    known = len(store.source)
++    appended = len(history) >= known and all(map(operator.is_, store.source, history[:known]))
++    if not appended:
++        store.source, store.loaded, store.memo = [], [], {}
++        store.generation += 1
++        known = 0
++    new = list(history[known:])
++    if new or not appended or not store.sidecar.exists():
++        lines: list[str] = []
++        rebuilt: list[tuple[str, Frame, str] | None] = []
++        for entry in new:
++            line, item = _round_trip(entry)
++            lines.append(line)
++            rebuilt.append(item)
++        mode = "a" if appended and known and store.sidecar.exists() else "w"
++        with open(store.sidecar, mode, encoding="utf-8") as handle:
++            if lines:
++                handle.write("\n".join(lines) + "\n")
++        store.source.extend(new)
++        store.loaded.extend(rebuilt)
++    payload = {
++        "current_frame": frame_to_payload(current_frame),
++        _INCREMENTAL_KEY: store.sidecar.name,
++        "history_count": len(store.source),
++        "generation": store.generation,
++    }
++    tmp_path = path.with_suffix(f"{path.suffix}.tmp")
++    tmp_path.write_text(json.dumps(payload), encoding="utf-8")
++    tmp_path.replace(path)
++
++
++def _in_sync(path: Path, payload: dict[str, Any]) -> _HistoryStore | None:
++    with _STORES_LOCK:
++        store = _STORES.get(_store_key(path))
++    if (
++        store is not None
++        and payload.get("history_count") == len(store.source)
++        and payload.get("generation") == store.generation
++    ):
++        return store
++    return None
++
++
++def _load_incremental_history(path: Path, payload: dict[str, Any]) -> list[HistoryEntry]:
++    store = _in_sync(path, payload)
++    if store is not None:
++        return [
++            HistoryEntry(action=item[0], frame=item[1], result=json.loads(item[2]))
++            for item in store.loaded
++            if item is not None
++        ]
++    # another process, or a store that lost track: read the sidecar from disk
++    sidecar = path.with_name(str(payload.get(_INCREMENTAL_KEY) or ""))
++    entries: list[HistoryEntry] = []
++    if sidecar.name and sidecar.exists():
++        with open(sidecar, encoding="utf-8") as handle:
++            for raw_line in handle:
++                if raw_line.strip():
++                    entry = history_entry_from_payload(json.loads(raw_line))
++                    if entry is not None:
++                        entries.append(entry)
++    return entries
++
++
++def load_history_encoded(
++    path: Path,
++    name: str,
++    encode: Callable[[HistoryEntry], str | None],
++) -> tuple[Frame | None, str | None]:
++    """(current frame, the history as one JSON array text) under the incremental hand-off.
++
++    Each element is encode(entry) for the entry a load would return, computed once
++    per entry and cached under `name`; entries encoded as None are left out.
++    Returns (frame, None) when the state is not in incremental form or the
++    in-process store is out of sync - the caller then uses load_runtime_state.
++    """
++    if not path.exists():
++        return None, None
++    payload = json.loads(path.read_text(encoding="utf-8"))
++    current_frame = frame_from_payload(payload.get("current_frame"))
++    if _INCREMENTAL_KEY not in payload:
++        return current_frame, None
++    store = _in_sync(path, payload)
++    if store is None:
++        return current_frame, None
++    memo = store.memo.setdefault(name, [])
++    for item in store.loaded[len(memo):]:
++        memo.append(
++            None if item is None
++            else encode(HistoryEntry(action=item[0], frame=item[1], result=json.loads(item[2])))
++        )
++    return current_frame, "[" + ", ".join(text for text in memo if text is not None) + "]"
++
++
++def discard_runtime_state(path: Path) -> None:
++    """Drop a finished game's incremental store and sidecar (nothing to do on the default path)."""
++    with _STORES_LOCK:
++        store = _STORES.pop(_store_key(path), None)
++    sidecar = store.sidecar if store is not None else path.with_name(path.name + _SIDECAR_SUFFIX)
++    try:
++        sidecar.unlink(missing_ok=True)
++    except OSError:
++        pass
+diff --git a/ARC3-Inference/inference/agent/tool_agent.py b/ARC3-Inference/inference/agent/tool_agent.py
+index 89c7c7a..5cbafde 100644
+--- a/ARC3-Inference/inference/agent/tool_agent.py
++++ b/ARC3-Inference/inference/agent/tool_agent.py
+@@ -66,8 +66,11 @@ from inference.agent.vision_context import (
+     current_grid_image_part,
+ )
+ 
+-from inference.agent.python_tool_sandbox import run_sandboxed_python
+-from inference.agent.runtime_state import Frame, HistoryEntry, RUNTIME_STATE_FILENAME, load_runtime_state
++from inference.agent.python_tool_sandbox import PreEncodedJSON, run_sandboxed_python
++from inference.agent.runtime_state import (
++    Frame, HistoryEntry, RUNTIME_STATE_FILENAME, load_history_encoded, load_runtime_state,
++    state_handoff_incremental,
++)
+ from inference.utils.openai_compat import (
+     assemble_streamed_chat_response,
+     build_chat_payload,
+@@ -2870,6 +2873,16 @@ def _ascii_history_view_payload(history_entries: list[HistoryEntry]) -> list[dic
+     return payload
+ 
+ 
++def _ascii_history_view_entry_json(entry: HistoryEntry) -> str | None:
++    """E077: one history entry's sandbox view as JSON text (None if the view skips it).
++
++    json.dumps of a list joins its elements' encodings with ", ", so joining these
++    texts reproduces json.dumps(_ascii_history_view_payload(entries)) exactly.
++    """
++    payload = _ascii_history_view_payload([entry])
++    return json.dumps(payload[0], ensure_ascii=False) if payload else None
++
++
+ _VISION_PATCH_PIXELS = 32          # Qwen3.6: 16px patches, 2x2 merge
+ _VISION_SENTINEL_TOKENS = 2        # vision start/end markers
+ _IMAGE_TOKENS_FALLBACK = 402       # 64-cell board at MULTIMODAL_UPSCALE=10
+@@ -5757,7 +5770,15 @@ class ToolAgent:
+             next_valid_actions: list[str] | None = None,
+             last_action_call_result: dict[str, Any] | None = None,
+         ) -> dict[str, Any]:
+-            refreshed_frame, refreshed_history = load_runtime_state(state_path)
++            # E077: under ARC3_STATE_HANDOFF=incremental the history view's JSON is
++            # built once per entry and sent as is (byte-identical to the default)
++            history_json = None
++            if state_handoff_incremental():
++                refreshed_frame, history_json = load_history_encoded(
++                    state_path, "sandbox_history_view", _ascii_history_view_entry_json
++                )
++            if history_json is None:
++                refreshed_frame, refreshed_history = load_runtime_state(state_path)
+             current_frame_payload = _ascii_frame_view_payload(refreshed_frame)
+             if isinstance(next_valid_actions, list):
+                 sanitized_actions = [str(item).strip() for item in next_valid_actions if str(item).strip()]
+@@ -5770,7 +5791,11 @@ class ToolAgent:
+             )
+             return {
+                 "current_frame": current_frame_payload,
+-                "history": _ascii_history_view_payload(refreshed_history),
++                "history": (
++                    PreEncodedJSON(history_json)
++                    if history_json is not None
++                    else _ascii_history_view_payload(refreshed_history)
++                ),
+                 "valid_actions": sanitized_actions,
+                 "death_ledger": (
+                     self._death_ledger_payload()
+diff --git a/ARC3-Inference/inference/framework/solver.py b/ARC3-Inference/inference/framework/solver.py
+index e40976c..4485fae 100644
+--- a/ARC3-Inference/inference/framework/solver.py
++++ b/ARC3-Inference/inference/framework/solver.py
+@@ -39,6 +39,7 @@ from inference.agent.runtime_state import (
+     Frame,
+     HistoryEntry,
+     RUNTIME_STATE_FILENAME,
++    discard_runtime_state,
+     write_runtime_state,
+ )
+ from inference.agent.tool_agent import (
+@@ -740,6 +741,7 @@ class _HarnessGameSession:
+                 run.solver_note = f"tokens={total_tokens}"
+             self._finish_if_needed()
+             self.state_path.unlink(missing_ok=True)
++            discard_runtime_state(self.state_path)  # E077: incremental store + sidecar, if any
+             self._write_analysis_html()
+             self.write_viewer_payload()
+ 
