@@ -2,12 +2,13 @@
 fig3_noise_floor_v2.png / .svg and fig3_data_v2.csv (the originals fig3_noise_floor.* / fig3_data.csv stay untouched),
 and inserts one v2 line into captions.md if that file exists in --out.
 
-What changed against fig3 (2026-10-27): 25 ARC-AGI-3 rows instead of 21 and 11 ARC-AGI-2 rows instead of 6.
+What changed against fig3 (2026-10-27): 25 ARC-AGI-3 rows instead of 21 and 12 ARC-AGI-2 rows instead of 6 (UPDATE 2026-11-02: the
+  12th row is the v5 sixth draw, 29.72, ref 57866391, submitted 2026-11-01 08:53 UTC, read 2026-11-02 14:59 UTC; the table held 11 rows on 2026-11-01).
   * E154 keep-alive now has 4 draws (31.00, 28.05, 27.07, 29.43): mean 28.89 +- SD 1.71. It is its own saved version and
     is NOT pooled with E098 (leaderboard_noise.py section 12).
   * E149 v3's 0.31 keeps its hollow "excluded" ring. E149 v4's 15.06 (kernel v191, ref 57806285) is drawn as an orange
     diamond: a half-clock DOSE draw of its own version, in band, never pooled (section 13). It is not an instrument failure.
-  * ARC-AGI-2: v4 n = 6, v5 n = 5 (leaderboard_noise_agi2.py section 7).
+  * ARC-AGI-2: v4 n = 6, v5 n = 6 (leaderboard_noise_agi2.py section 8; it was v5 n = 5, section 7, on 2026-11-01).
   * The MDE panel is unchanged: the pooled SD is still E098 x6 + facts x2 (df 6) = 1.73, so 3.00 / 52 do not move.
 The plotting code is fig3() of analysis/make_paper_figures.py with the new rows, labels and layout height (the only
 reason it is copied rather than imported: that function is hard-wired to the 10-27 label table and a 7.6 in page).
@@ -80,7 +81,7 @@ def export_data(dest):
 def fig3_v2(out):
     a3, a2 = load_tables()
     draws = [dict(ref=r, date=d, score=s, sv=sv) for r, d, s, sv in a3]
-    assert len(draws) == 25 and len(a2) == 11, "the 2026-11-01 tables hold 25 ARC-AGI-3 and 11 ARC-AGI-2 rows"
+    assert len(draws) == 25 and len(a2) == 12, "the 2026-11-02 tables hold 25 ARC-AGI-3 and 12 ARC-AGI-2 rows"
     groups = {}
     for x in sorted(draws, key=lambda r: r["date"]):
         g = groups.setdefault(AGI3_LABELS[x["sv"]], dict(scores=[], sv=x["sv"], excl=x["sv"] in EXCLUDED, dose=x["sv"] in DOSE))
@@ -93,7 +94,7 @@ def fig3_v2(out):
     fac = groups["Facts v1 (E118)"]["scores"]
     v4, v5 = agi2["v4: public 4B notebook"]["scores"], agi2["v5: E132 second pass"]["scores"]
     # the pooled SD must still be the registered one (E098 x6 + facts x2, df 6, E154 and the dose draw in no pool)
-    assert (len(e098), len(e154), len(fac), len(v4), len(v5)) == (6, 4, 2, 6, 5), "unexpected group sizes"
+    assert (len(e098), len(e154), len(fac), len(v4), len(v5)) == (6, 4, 2, 6, 6), "unexpected group sizes"
     assert e154 == [31.00, 28.05, 27.07, 29.43], e154
     first5 = [x["score"] for x in sorted(draws, key=lambda r: r["date"]) if x["sv"] in E098_SV][:5]
     sd5, sd_pool, sd_old = LBN.sd(first5), LBN.pooled([e098, fac])[0], LBN.OLD_SD
