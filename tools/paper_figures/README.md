@@ -61,3 +61,5 @@ Only the inputs: the paths now point into `data/`, the leaderboard tables are re
 `leaderboard_noise.py` (whose five helper functions are inlined with the same formulas), `game_curve` comes from
 `game_curve.py` (copied unchanged from `k_killtests.py`), the ledger lines come from `ledger_excerpts.json`, and the
 default output folder is `./paper_figures_out`. Every plotting line is unchanged.
+
+2026-11-02 evening: `make_cover_v7.py` reuses v6's drawing code unchanged and adds the annotation "10 games ahead, 2 behind at 40k" (ledger l.3212) beside the shaded 40k band; it writes `cover_v7.png`, the Paper Track cover candidate (v6 is the fallback).
