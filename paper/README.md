@@ -1,6 +1,6 @@
 # Paper
 
-- Long paper (PDF): `paper_long.pdf` = the current version (today `paper_long_v6.pdf`, 21 pages, built 2026-11-01; dated copies are kept alongside). Title: "Short Tests Pick the Wrong Agent".
+- Long paper (PDF): `paper_long.pdf` = the current version (today `paper_long_v7.pdf`, 21 pages, built 2026-11-02; dated copies are kept alongside). Title: "Short Tests Pick the Wrong Agent".
 - Kaggle Paper Track writeup (at most 1,500 words): submitted separately on Kaggle by 2026-11-08; its link is added here then.
 - Figures: regenerate with `tools/paper_figures/` (the published files are in `tools/paper_figures/expected/`; Figure 3's 2026-11-01 version is `fig3_noise_floor_v2.png`).
 
