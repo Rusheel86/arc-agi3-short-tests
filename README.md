@@ -1,7 +1,7 @@
 # Short Tests Pick the Wrong Agent: our ARC-AGI-3 entry (E154), its patches and the measurement tools
 
 This is the open-source release of our entry to the ARC Prize 2026 ARC-AGI-3 competition on Kaggle and of the code
-and experiment ledger behind its Paper Track writeup, "Short Tests Pick the Wrong Agent" (PDF: `paper/paper_long_v6.pdf`).
+and experiment ledger behind its Paper Track writeup, "Short Tests Pick the Wrong Agent" (PDF: `paper/paper_long.pdf`, the current version; dated copies alongside it).
 
 ## In plain words
 
@@ -119,7 +119,7 @@ answered by the organisers.
 
 ## Links
 
-- Paper (PDF): https://github.com/Rusheel86/arc-agi3-short-tests/blob/main/paper/paper_long_v6.pdf
+- Paper (PDF): https://github.com/Rusheel86/arc-agi3-short-tests/blob/main/paper/paper_long.pdf (current version; dated copies alongside it)
 - Paper Track writeup: to be submitted on Kaggle by 2026-11-08 (link added then)
 - Public notebook: Kaggle kernel `rusheelsharma/arc-agi-3-short-tests-pick-the-wrong-agent-e154`, version 1 (code byte-identical to the private kernel version 189); leaderboard submission ref 57877052 (public score 28.74, 2026-11-02)
 - This repository: https://github.com/Rusheel86/arc-agi3-short-tests
