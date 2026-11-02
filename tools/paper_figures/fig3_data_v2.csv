@@ -1,0 +1,46 @@
+version,score,kind
+Gambler v1 (other kernel),20.41,draw
+E016 prompt guide (SGLang),28.56,draw
+E016 prompt guide (SGLang),24.06,draw
+E016 prompt guide (SGLang),21.87,draw
+Wrong notebook (never plays),0.0,excluded (instrument failure)
+E040 (vLLM),21.24,draw
+E055 word ban,11.28,draw
+E060/E061 (vLLM),21.87,draw
+E073 prune384,18.1,draw
+E081 hand-off,23.98,draw
+E098 final version,27.27,draw
+E098 final version,30.07,draw
+E098 final version,28.24,draw
+E098 final version,28.37,draw
+E098 final version,29.68,draw
+E098 final version,25.01,draw
+Facts v1 (E118),24.42,draw
+Facts v1 (E118),26.06,draw
+E146 stub resave,0.0,excluded (instrument failure)
+E154 keep-alive,31.0,draw
+E154 keep-alive,28.05,draw
+E154 keep-alive,27.07,draw
+E154 keep-alive,29.43,draw
+E149 v3 half-clock,0.31,excluded (instrument failure)
+E149 v4 half-clock (dose),15.06,"excluded (own dose, never pooled)"
+v4: public 4B notebook,30.97,draw
+v4: public 4B notebook,29.72,draw
+v4: public 4B notebook,31.81,draw
+v4: public 4B notebook,26.39,draw
+v4: public 4B notebook,28.06,draw
+v4: public 4B notebook,29.31,draw
+v5: E132 second pass,26.81,draw
+v5: E132 second pass,30.97,draw
+v5: E132 second pass,29.31,draw
+v5: E132 second pass,28.47,draw
+v5: E132 second pass,28.89,draw
+"MDE, 10 control + 4 candidate draws, SD 1.73",3.003,computed
+draws per version for +1 at SD 1.73,52,computed
+SD first 5 E098 draws,1.14,computed
+SD pooled E098 x6 + facts x2 (df 6),1.735,computed
+SD borrowed,3.9,read
+"E154 own SD (n 4, not in the pool)",1.709,computed
+"sensitivity, not plotted: SD pooled E098 x6 + facts x2 + E154 x4 (df 9)",1.726,computed
+"sensitivity, not plotted: MDE 10 + 4 draws at that SD",2.988,computed
+"sensitivity, not plotted: draws per version for +1 at that SD",52,computed

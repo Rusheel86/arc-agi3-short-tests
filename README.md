@@ -1,7 +1,7 @@
 # Short Tests Pick the Wrong Agent: our ARC-AGI-3 entry (E154), its patches and the measurement tools
 
 This is the open-source release of our entry to the ARC Prize 2026 ARC-AGI-3 competition on Kaggle and of the code
-and experiment ledger behind its Paper Track writeup, "Short Tests Pick the Wrong Agent" (PDF: {{PDF_URL}}).
+and experiment ledger behind its Paper Track writeup, "Short Tests Pick the Wrong Agent" (PDF: `paper/paper_long_v6.pdf`).
 
 ## In plain words
 
@@ -47,6 +47,7 @@ Every number below is a Kaggle public-leaderboard score of the same saved notebo
 | Version | Kaggle saved version | Draws [measured] | Mean | SD per draw |
 |---|---|---|---|---|
 | **E154** = E098 + keep-alive (this release) | kernel version 189, script version id 362115816 | 31.00, 28.05, 27.07, 29.43 | 28.89 | 1.71 |
+| Public release copy of E154 (this notebook: kernel `arc-agi-3-short-tests-pick-the-wrong-agent-e154` version 1, code byte-identical to version 189) | ref 57877052 | 28.74 | 28.74 | (1 draw; reported separately from version 189, not pooled) |
 | E098 (depth + K8V4 + timeout fix) | script version ids 357974936 (1 draw) and 358364499 (5 draws), the same competition path | 27.27, 30.07, 28.24, 28.37, 29.68, 25.01 | 28.11 | 1.83 |
 | E081 (the version before E098) | script version id 357441618 | 23.98 | | |
 
@@ -99,7 +100,7 @@ solver.py matches the sha256 that version 189's own log printed).
 | `tools/noise_floor/` | a small CLI: give it a CSV of leaderboard draws per version, get the per-draw SD, the smallest detectable difference and the draws needed; with tests |
 | `tools/e155_truncation/` | the pre-registered E155 analysis (token elasticity at deployed depth on community games, by truncating one run at fixed token budgets), with its 67-check test suite |
 | `tools/paper_figures/` | the scripts and data that regenerate the paper's five figures and both covers, and a check against the published files |
-| `paper/` | the writeup and PDF go here (not yet added) |
+| `paper/` | the long paper as PDF (`paper_long_v6.pdf`, 21 pages, 2026-11-01); the Kaggle writeup link is added once it is submitted (by 2026-11-08) |
 | `LICENSE` | MIT-0, for our code |
 | `LICENSES/Apache-2.0.txt`, `NOTICE` | the Apache-2.0 text and the notices for the Apache-2.0 code shipped here |
 | `THIRD_PARTY.md` | every inherited component and model, with its licence, source and how sure we are |
@@ -118,7 +119,7 @@ answered by the organisers.
 
 ## Links
 
-- Paper (PDF): {{PDF_URL}}
-- Paper Track writeup: {{WRITEUP_URL}}
-- Public notebook: {{PICK1_VERSION}}; leaderboard submission: {{SUBMISSION_ID}}
+- Paper (PDF): https://github.com/Rusheel86/arc-agi3-short-tests/blob/main/paper/paper_long_v6.pdf
+- Paper Track writeup: to be submitted on Kaggle by 2026-11-08 (link added then)
+- Public notebook: Kaggle kernel `rusheelsharma/arc-agi-3-short-tests-pick-the-wrong-agent-e154`, version 1 (code byte-identical to the private kernel version 189); leaderboard submission ref 57877052 (public score 28.74, 2026-11-02)
 - This repository: https://github.com/Rusheel86/arc-agi3-short-tests

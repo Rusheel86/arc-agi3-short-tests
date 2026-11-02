@@ -29,6 +29,7 @@ the same numbers but the PNG pixels differ.
 | `fig2_horizon_reversal` (+ `cover.png`) | Figure 1 and the earlier cover | banning the words that open self-checks leads early and loses at 60 minutes, 18 public games; hidden-set draws 11.28 vs 21.24 and 21.87 | E055, E058, E072, E040, E061 |
 | `fig1_half_tokens_did_not_cost` (+ `cover_alt.png`) | Figure 2 | hidden-set score against tokens per game; E098 got about half E081's tokens per game and scored 4.1 more; the cause is not isolated | E081, E098, E137, E072 |
 | `fig3_noise_floor` | Figure 3 | every leaderboard draw by saved version (as of 2026-10-27), and the minimum detectable effect against draws per version | E138, E154, E149, E146 |
+| `fig3_noise_floor_v2` (+ `fig3_data_v2.csv`, `make_fig3_v2.py`) | Figure 3, newer version | the same figure with every draw on record at 2026-11-01: 25 ARC-AGI-3 rows (E154 now 4 draws, 28.89 ± 1.71, never pooled with E098; E149 v4's 15.06 as an own-dose draw, never pooled) and 11 ARC-AGI-2 rows (v4 n = 6, v5 n = 5). The pooled SD 1.73, the 3.00 and the 52 do not move. `fig3_noise_floor` above is left as published | E138, E154, E149, E146 |
 | `fig4_memory_prices` | Figure 4 | KV-pool blocks per full-context game with a drafter's own cache; expert pruning buys memory, not speed | E137, E073 |
 | `fig5_agi2_funnel` | Figure 5 | ARC-AGI-2: answers within reach of a small decoder change, yet none found | E142, E150-E152 |
 
@@ -47,9 +48,12 @@ not part of this release, and `data/` holds what was read from them.
 | `e137_summary_subset.json`, `t2a_result_excerpt.md`, `throughput_arithmetic_excerpt.txt` | the drafter bench and allocator numbers, the KV pool sizes |
 | `ledger_excerpts.json` | the 3 ledger lines that are the only record of three plotted numbers (E149's 0.31, E150's 0 of 14, E073's 18 -> 24 games), with the line numbers the captions print |
 | `agi2/` | the ARC-AGI-2 counts (E142, E151, E152, the v6 smoke): only the fields read |
+| `agi3_draws_v2.csv`, `agi2_draws_v2.csv` | the same two leaderboard tables at 2026-11-01 (25 ARC-AGI-3 rows, 11 ARC-AGI-2 rows), read only by `make_fig3_v2.py` (exported from the project tables with `make_fig3_v2.py --export-data DIR`) |
 
 To redraw Figure 3 with later draws (E154 has 4 draws by 2026-10-29), append rows to `data/agi3_draws.csv` (the labels
 come from `AGI3_LABELS` in the script); the published figure then no longer matches, by design.
+
+`python -I tools/paper_figures/make_fig3_v2.py --out DIR` redraws the 2026-11-01 version; `check_figures.py` does not cover it (it compares `expected/` only). Run here it reproduced `fig3_noise_floor_v2.png` byte for byte.
 
 ## Changes against the project's script
 
