@@ -38,7 +38,7 @@ Inherited: Tufa Labs' Duck harness; Daniel Franzen's Milestone-2 harness, prompt
 
 ## 4. What generalises and what does not
 
-Without ARC words: where actions are scored and thinking is free on fixed compute, judge changes to thinking at the deployment horizon. On 38 community-made games E098 finished 3.95 levels per game against 4.22 for the E081 version on public games (E097 control), with community levels x1.69 cheaper per token (E110). E155, a registered truncation of this run, is void by its rule (data not obtained by 11-04); the token leg at depth is untested.
+Without ARC words: where actions are scored and thinking is free on fixed compute, judge changes to thinking at the deployment horizon. That includes coding, web and embodied agents with costly actions on fixed compute. On 38 community-made games E098 finished 3.95 levels per game against 4.22 for the E081 version on public games (E097 control), with community levels x1.69 cheaper per token (E110). E155, a registered truncation of this run, is void by its rule (data not obtained by 11-04); the token leg at depth is untested.
 
 Limits: one model and GPU type; the reversal rests on one change, one 60-minute session and single hidden-set draws, while cutting reasoning effort lost even at 20 minutes, with no early lead (E042); E110 crosses game sets and versions; five changes moved together.
 
