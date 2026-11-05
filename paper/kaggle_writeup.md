@@ -2,7 +2,7 @@
 
 ## 1. Why short tests pick the wrong agent
 
-Moves are scored, thinking is free, compute is fixed, and a level scores only when finished. Thinking's cost is immediate: each turn's tokens come out of the game's budget. Its payoff arrives later, on the hard levels that checking finishes. A test shorter than deployment counts the cost and misses the payoff, so it favours agents that think less. Meta-optimisation has the same short-horizon bias: learning rates tuned over short unrolls come out far too small (Wu et al., 2018, arXiv 1803.02021).
+Moves are scored, thinking is free, compute is fixed, and a level scores only when finished. Thinking's cost is immediate: each turn's tokens come out of the game's budget. Its payoff arrives later, on the hard levels that checking finishes. A test shorter than deployment counts the cost and misses the payoff, so it favours agents that think less. Meta-optimisation has the same short-horizon bias: learning rates tuned over short unrolls come out too small (Wu et al., 2018, arXiv 1803.02021).
 
 The ban's 60-minute runs show both halves (E058): on levels both arms solved the banned agent needed 11% fewer tokens, but of levels still open after 45k tokens it finished 2 of 22 by 60k against 8 of 21 (registered band). Unbanned, most "Hmm", "Wait" and "Actually" sentences check a rule against cells.
 
@@ -28,7 +28,7 @@ Inherited: Tufa Labs' Duck harness; Daniel Franzen's Milestone-2 harness, prompt
 
 **Half the tokens.** On 18 public games, truncated 60-minute runs give a score elasticity of 0.59 between 140k and 180k tokens per game (90% interval 0.33-0.89; E072). Stretched to ~154k, over a partly unmeasured range, it predicts about 16 points (21.5-21.9 if returns stopped at 180k) [computed]; E098 scored 28.11 against E081's 23.98. That step, whose registration assumed x0.9 tokens per game, changed five things: reply cap 12k to 32k tokens (4.5-5.1% of replies had hit 12k; E077), window 94,208 to 160,768 tokens, KV format, a timeout fix (6 of 6 timeouts had wiped saved functions; E081), and 19 games instead of 24.
 
-**The stack.** Public-leaderboard scores (55 hidden games): 23.98 (E081), 28.11 (E098) and 28.89 (E154), level with the baseline we started from (27.80, 27.89; E001) and below fifth place (56.02, 2026-11-02).
+**The stack.** Public-leaderboard scores (55 hidden games): 23.98 (E081), 28.11 (E098) and 28.89 (E154), level with our starting baseline (27.80, 27.89; E001) and below fifth place (56.02, 2026-11-02).
 
 **What did not help.** Prompts (24.83, three draws; E016), generated facts (+0.05, interval including 0; E136), light fine-tuning (E134) and ARC-AGI-2 program search (E141-E152).
 
@@ -38,10 +38,10 @@ Inherited: Tufa Labs' Duck harness; Daniel Franzen's Milestone-2 harness, prompt
 
 ## 4. What generalises and what does not
 
-Without ARC words: where actions are scored and thinking is free on fixed compute, judge changes to thinking at the deployment horizon. That includes coding, web and embodied agents with costly actions on fixed compute. On 38 community-made games E098 finished 3.95 levels per game against 4.22 for the E081 version on public games (E097 control), with community levels x1.69 cheaper per token (E110). E155, a registered truncation of this run, is void by its rule (data not obtained by 11-04); the token leg at depth is untested.
+Without ARC words: where actions are scored and thinking is free on fixed compute, judge changes to thinking at the deployment horizon. That includes coding, web and embodied agents with costly actions. On 38 community-made games E098 finished 3.95 levels per game against 4.22 for the E081 version on public games (E097 control), with community levels x1.69 cheaper per token (E110). E155, a registered truncation of this run, is void by its rule (data not obtained by 11-04); the token leg at depth is untested.
 
 Limits: one model and GPU type; the reversal rests on one change, one 60-minute session and single hidden-set draws, while cutting reasoning effort lost even at 20 minutes, with no early lead (E042); E110 crosses game sets and versions; five changes moved together.
 
 ## 5. Reproduction
 
-Public notebook: https://www.kaggle.com/code/rusheelsharma/arc-agi-3-short-tests-pick-the-wrong-agent-e154, version 1 (version 189's code; submission 57877052); pick 1: this copy. Code and ledger: https://github.com/Rusheel86/arc-agi3-short-tests; companion paper: https://github.com/Rusheel86/arc-agi3-short-tests/blob/main/paper/paper_long.pdf. Our code is MIT-0; inherited code keeps Apache-2.0 or MIT; unlicensed material is not redistributed; Flash-Next weights carry the Qwen Community License. Compute: Kaggle's free tier only (one RTX PRO 6000; four L4 for ARC-AGI-2), under 150 quota-hours [estimate].
+Public notebook: https://www.kaggle.com/code/rusheelsharma/arc-agi-3-short-tests-pick-the-wrong-agent-e154, version 1 (version 189's code; submission 57877052); pick 1: this copy. Code and ledger: https://github.com/Rusheel86/arc-agi3-short-tests; companion paper: https://github.com/Rusheel86/arc-agi3-short-tests/blob/main/paper/paper_long.pdf. Our code is MIT-0; inherited code keeps Apache-2.0 or MIT; unlicensed material is not redistributed; Flash-Next weights carry the Qwen Community License. Compute: Kaggle's free tier only (RTX PRO 6000; 4×L4 for ARC-AGI-2), under 150 quota-hours [estimate].
