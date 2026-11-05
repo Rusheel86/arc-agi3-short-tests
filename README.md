@@ -100,7 +100,7 @@ solver.py matches the sha256 that version 189's own log printed).
 | `tools/noise_floor/` | a small CLI: give it a CSV of leaderboard draws per version, get the per-draw SD, the smallest detectable difference and the draws needed; with tests |
 | `tools/e155_truncation/` | the pre-registered E155 analysis (token elasticity at deployed depth on community games, by truncating one run at fixed token budgets), with its 67-check test suite |
 | `tools/paper_figures/` | the scripts and data that regenerate the paper's five figures and both covers, and a check against the published files |
-| `paper/` | the long paper as PDF (`paper_long_v8.pdf`, 23 pages, 2026-11-02); the Kaggle writeup link is added once it is submitted (by 2026-11-08) |
+| `paper/` | the long paper as PDF (`paper_long_v9.pdf`, 23 pages, 2026-11-05); the Kaggle writeup link is added once it is submitted (by 2026-11-08) |
 | `LICENSE` | MIT-0, for our code |
 | `LICENSES/Apache-2.0.txt`, `NOTICE` | the Apache-2.0 text and the notices for the Apache-2.0 code shipped here |
 | `THIRD_PARTY.md` | every inherited component and model, with its licence, source and how sure we are |
